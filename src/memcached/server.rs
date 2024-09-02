@@ -4,6 +4,7 @@ use std::error::Error;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::signal;
 use tokio::sync::Mutex;
 
 use super::db::{Value, DB};
@@ -11,21 +12,40 @@ use super::handler::{handle_get, handle_set};
 use super::snapshot_handler::handle_snapshot;
 use super::types::{MemcachedError, Response};
 
-pub async fn serve(addr: &str, snapshot_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn serve(addr: &str, snapshot_dir: &str) -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind(addr).await?;
     println!("Server running on {}", addr);
+
+    let mut signal_handler = tokio::spawn(async {
+        match signal::ctrl_c().await {
+            Ok(_) => {
+                println!("Shutting down...");
+            }
+            Err(err) => {
+                println!("Failed to listen for SIGTERM: {}", err);
+            }
+        }
+    });
 
     let db = restore_db(snapshot_dir).await?;
 
     loop {
-        let (socket, _) = listener.accept().await?;
-        let db = db.clone();
-        let snapshot_dir = snapshot_dir.to_string();
+        tokio::select! {
+            Ok((socket, _)) = listener.accept() => {
+                let db = db.clone();
+                let snapshot_dir = snapshot_dir.to_string();
 
-        tokio::spawn(async move {
-            process(socket, db, &snapshot_dir).await;
-        });
+                tokio::spawn(async move {
+                    process(socket, db, &snapshot_dir).await;
+                });
+            }
+            _ = &mut signal_handler => {
+                break;
+            }
+        }
     }
+
+    Ok(())
 }
 
 async fn restore_db(snapshot_dir: &str) -> Result<Arc<DB>, Box<dyn Error>> {
