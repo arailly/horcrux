@@ -141,7 +141,6 @@ pub async fn process(mut socket: tokio::net::TcpStream, db: Arc<DB>, snapshot_di
         let request: String;
         match socket.read(&mut buf).await {
             Ok(n) if n == 0 => {
-                println!("Connection closed");
                 return;
             }
             Ok(n) => {
