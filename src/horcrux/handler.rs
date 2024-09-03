@@ -10,7 +10,7 @@ pub async fn handle_set(
     parts: Vec<&str>,
 ) -> Result<Response, HorcruxError> {
     // validate request
-    if parts.len() != 5 {
+    if parts.len() != 5 && parts.len() != 6 {
         return Ok(Response::Error);
     }
 
@@ -33,23 +33,27 @@ pub async fn handle_set(
             return Ok(Response::Error);
         }
     };
-    let mut buf = vec![0; len];
-    match socket.read(&mut buf).await {
-        Ok(n) if n != len => {
-            return Err(HorcruxError::Connection("Failed to read data".to_string()));
-        }
-        Ok(_) => {}
-        Err(_) => {
-            return Err(HorcruxError::Connection("Failed to read data".to_string()));
+    let data: String;
+    if parts.len() == 6 {
+        data = parts[5].to_string();
+    } else {
+        let mut buf = vec![0; len];
+        match socket.read(&mut buf).await {
+            Ok(n) if n != len => {
+                return Err(HorcruxError::Connection("Failed to read data".to_string()));
+            }
+            Ok(_) => {
+                data = String::from_utf8_lossy(&buf).to_string();
+            }
+            Err(_) => {
+                return Err(HorcruxError::Connection("Failed to read data".to_string()));
+            }
         }
     }
 
     // store data
     let key = parts[1].to_string();
-    let value = Value {
-        flags,
-        data: String::from_utf8_lossy(&buf).to_string(),
-    };
+    let value = Value { flags, data: data };
     {
         db.lock().await.insert(key, value);
     }

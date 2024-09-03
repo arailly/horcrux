@@ -155,7 +155,7 @@ async fn restore_db(snapshot_dir: &str) -> Result<Arc<DB>, Box<dyn Error>> {
 pub async fn process(mut socket: tokio::net::TcpStream, db: Arc<DB>, snapshot_dir: &str) {
     loop {
         // read request line
-        let mut buf = vec![0; 1024];
+        let mut buf = vec![0; 4096];
         let request: String;
         match socket.read(&mut buf).await {
             Ok(n) if n == 0 => {
