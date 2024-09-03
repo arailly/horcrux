@@ -11,7 +11,11 @@ use super::db::DB;
 pub async fn handle_snapshot(db: &Arc<DB>, snapshot_dir: &str) {
     match unsafe { fork() } {
         Ok(ForkResult::Parent { child, .. }) => {
-            println(&format!("Snapshot process started: {}", child));
+            println(&format!(
+                "{:?}: Snapshot process started: {}",
+                Utc::now().format("%+").to_string(),
+                child
+            ));
         }
         Ok(ForkResult::Child) => {
             let dumped = dump(db).await;
@@ -38,7 +42,11 @@ pub async fn handle_snapshot(db: &Arc<DB>, snapshot_dir: &str) {
             }
 
             let pid = getpid();
-            println(&format!("Snapshot process finished: {}", pid));
+            println(&format!(
+                "{:?}: Snapshot process finished: {}",
+                Utc::now().format("%+").to_string(),
+                pid
+            ));
             unsafe { libc::_exit(0) };
         }
         Err(_) => {

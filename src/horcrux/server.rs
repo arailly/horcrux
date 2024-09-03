@@ -1,4 +1,5 @@
 use bytes::{Buf, Bytes};
+use chrono::Utc;
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
@@ -123,7 +124,10 @@ async fn restore_db(snapshot_dir: &str) -> Result<Arc<DB>, Box<dyn Error>> {
 
     match tokio::fs::read(snapshot_file).await {
         Ok(data) => {
-            println!("Restoring DB from snapshot");
+            println!(
+                "{:?}: Restoring DB from snapshot",
+                Utc::now().format("%+").to_string()
+            );
 
             let mut db = db.lock().await;
             let mut mem = Bytes::from(data);
@@ -148,7 +152,7 @@ async fn restore_db(snapshot_dir: &str) -> Result<Arc<DB>, Box<dyn Error>> {
         },
     }
 
-    println!("DB restored");
+    println!("{:?}: DB restored", Utc::now().format("%+").to_string());
     Ok(db)
 }
 
