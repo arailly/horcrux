@@ -1,5 +1,6 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use chrono::Utc;
+use nix::sys::wait::waitpid;
 use nix::unistd::{fork, getpid, ForkResult};
 use std::fs::{rename, File};
 use std::io::prelude::*;
@@ -16,6 +17,9 @@ pub async fn handle_snapshot(db: &Arc<DB>, snapshot_dir: &str) {
                 Utc::now().format("%+").to_string(),
                 child
             ));
+            if waitpid(child, None).is_err() {
+                println("Failed to wait for snapshot process");
+            }
         }
         Ok(ForkResult::Child) => {
             let dumped = dump(db).await;

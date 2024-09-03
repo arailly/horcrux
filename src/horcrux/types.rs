@@ -2,7 +2,7 @@ pub enum Response {
     Stored,
     Value(String),
     Error,
-    Accepted,
+    SnapshotFinished,
 }
 
 impl Response {
@@ -11,7 +11,7 @@ impl Response {
             Response::Stored => "STORED\r\n".as_bytes(),
             Response::Value(response) => response.as_bytes(),
             Response::Error => "ERROR\r\n".as_bytes(),
-            Response::Accepted => "ACCEPTED\r\n".as_bytes(),
+            Response::SnapshotFinished => "SNAPSHOT FINISHED\r\n".as_bytes(),
         }
     }
 }

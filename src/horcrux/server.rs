@@ -202,7 +202,7 @@ pub async fn process(mut socket: tokio::net::TcpStream, db: Arc<DB>, snapshot_di
             }
             "snapshot" => {
                 handle_snapshot(&db, snapshot_dir).await;
-                if send_response(&mut socket, Response::Accepted)
+                if send_response(&mut socket, Response::SnapshotFinished)
                     .await
                     .is_err()
                 {
