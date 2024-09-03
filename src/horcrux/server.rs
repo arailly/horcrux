@@ -46,6 +46,19 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
 
     let db = restore_db(&config.snapshot_dir).await?;
 
+    // SIGINT handler
+    let mut sigint_task = tokio::spawn(async {
+        let mut sigint = signal(SignalKind::interrupt()).unwrap();
+        match sigint.recv().await {
+            Some(_) => {
+                println!("Shutting down...");
+            }
+            None => {
+                println!("Failed to listen for SIGINT");
+            }
+        }
+    });
+
     // SIGTERM handler
     let snapshot_dir_for_signal = config.snapshot_dir.clone();
     let db_for_signal = db.clone();
@@ -92,6 +105,9 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
                 });
             }
             _ = &mut sigterm_task => {
+                break;
+            }
+            _ = &mut sigint_task => {
                 break;
             }
         }
