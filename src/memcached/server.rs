@@ -4,21 +4,55 @@ use std::error::Error;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::signal;
 use tokio::sync::Mutex;
+use tokio::{signal, time, time::Duration};
 
 use super::db::{Value, DB};
 use super::handler::{handle_get, handle_set};
 use super::snapshot_handler::handle_snapshot;
 use super::types::{MemcachedError, Response};
 
-pub async fn serve(addr: &str, snapshot_dir: &str) -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind(addr).await?;
-    println!("Server running on {}", addr);
+pub struct ServerConfig {
+    addr: String,
+    snapshot_dir: String,
+    snapshot_interval_secs: u64,
+}
 
-    let mut signal_handler = tokio::spawn(async {
+impl ServerConfig {
+    pub fn new(
+        addr: String,
+        snapshot_dir: String,
+        snapshot_interval_secs: u64,
+    ) -> Result<Self, String> {
+        if snapshot_dir == "" {
+            return Err("Snapshot directory cannot be empty".to_string());
+        }
+        if snapshot_interval_secs == 0 {
+            return Err("Snapshot interval cannot be 0".to_string());
+        }
+
+        Ok(ServerConfig {
+            addr,
+            snapshot_dir,
+            snapshot_interval_secs,
+        })
+    }
+}
+
+pub async fn serve(config: &ServerConfig) -> Result<(), Box<dyn Error>> {
+    let listener = TcpListener::bind(&config.addr).await?;
+    println!("Server running on {}", &config.addr);
+
+    let db = restore_db(&config.snapshot_dir).await?;
+
+    // SIGTERM handler
+    let snapshot_dir_for_signal = config.snapshot_dir.clone();
+    let db_for_signal = db.clone();
+    let mut signal_task = tokio::spawn(async move {
         match signal::ctrl_c().await {
             Ok(_) => {
+                println!("Taking snapshot before shutting down");
+                handle_snapshot(&db_for_signal, &snapshot_dir_for_signal).await;
                 println!("Shutting down...");
             }
             Err(err) => {
@@ -27,24 +61,41 @@ pub async fn serve(addr: &str, snapshot_dir: &str) -> Result<(), Box<dyn Error>>
         }
     });
 
-    let db = restore_db(snapshot_dir).await?;
+    // take snapshot at regular intervals
+    let interval = config.snapshot_interval_secs;
+    let snapshot_dir_for_interval = config.snapshot_dir.clone();
+    let db_for_interval = db.clone();
+    let interval_task = tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_secs(interval));
+        // ignore the first tick, which is triggered immediately
+        interval.tick().await;
 
+        loop {
+            interval.tick().await;
+            println!("Start taking snapshot");
+            handle_snapshot(&db_for_interval, &snapshot_dir_for_interval).await;
+            println!("Finished taking snapshot");
+        }
+    });
+
+    // main loop
     loop {
         tokio::select! {
             Ok((socket, _)) = listener.accept() => {
                 let db = db.clone();
-                let snapshot_dir = snapshot_dir.to_string();
+                let snapshot_dir = config.snapshot_dir.clone();
 
                 tokio::spawn(async move {
                     process(socket, db, &snapshot_dir).await;
                 });
             }
-            _ = &mut signal_handler => {
+            _ = &mut signal_task => {
                 break;
             }
         }
     }
 
+    interval_task.abort();
     Ok(())
 }
 
