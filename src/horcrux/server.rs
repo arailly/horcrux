@@ -10,15 +10,15 @@ use tokio::{signal, time, time::Duration};
 use super::db::{Value, DB};
 use super::handler::{handle_get, handle_set};
 use super::snapshot_handler::handle_snapshot;
-use super::types::{MemcachedError, Response};
+use super::types::{HorcruxError, Response};
 
-pub struct ServerConfig {
+pub struct Config {
     addr: String,
     snapshot_dir: String,
     snapshot_interval_secs: u64,
 }
 
-impl ServerConfig {
+impl Config {
     pub fn new(
         addr: String,
         snapshot_dir: String,
@@ -31,7 +31,7 @@ impl ServerConfig {
             return Err("Snapshot interval cannot be 0".to_string());
         }
 
-        Ok(ServerConfig {
+        Ok(Config {
             addr,
             snapshot_dir,
             snapshot_interval_secs,
@@ -39,7 +39,7 @@ impl ServerConfig {
     }
 }
 
-pub async fn serve(config: &ServerConfig) -> Result<(), Box<dyn Error>> {
+pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind(&config.addr).await?;
     println!("Server running on {}", &config.addr);
 
@@ -124,7 +124,7 @@ async fn restore_db(snapshot_dir: &str) -> Result<Arc<DB>, Box<dyn Error>> {
             }
             _ => {
                 return Err(
-                    MemcachedError::RestoreDB("Failed to read snapshot file".to_string()).into(),
+                    HorcruxError::RestoreDB("Failed to read snapshot file".to_string()).into(),
                 );
             }
         },
@@ -205,10 +205,10 @@ pub async fn process(mut socket: tokio::net::TcpStream, db: Arc<DB>, snapshot_di
 async fn send_response(
     socket: &mut tokio::net::TcpStream,
     response: Response,
-) -> Result<(), MemcachedError> {
+) -> Result<(), HorcruxError> {
     if socket.write_all(response.as_bytes()).await.is_err() {
         println!("Failed to send response");
-        return Err(MemcachedError::Connection(
+        return Err(HorcruxError::Connection(
             "Failed to send response".to_string(),
         ));
     }

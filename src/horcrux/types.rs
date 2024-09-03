@@ -17,18 +17,18 @@ impl Response {
 }
 
 #[derive(Debug)]
-pub enum MemcachedError {
+pub enum HorcruxError {
     RestoreDB(String),
     Connection(String),
 }
 
-impl std::fmt::Display for MemcachedError {
+impl std::fmt::Display for HorcruxError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            MemcachedError::RestoreDB(msg) => write!(f, "Failed to restore DB: {}", msg),
-            MemcachedError::Connection(msg) => write!(f, "Connection error: {}", msg),
+            HorcruxError::RestoreDB(msg) => write!(f, "Failed to restore DB: {}", msg),
+            HorcruxError::Connection(msg) => write!(f, "Connection error: {}", msg),
         }
     }
 }
 
-impl std::error::Error for MemcachedError {}
+impl std::error::Error for HorcruxError {}

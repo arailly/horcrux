@@ -2,13 +2,13 @@ use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 
 use super::db::{Value, DB};
-use super::types::{MemcachedError, Response};
+use super::types::{HorcruxError, Response};
 
 pub async fn handle_set(
     socket: &mut tokio::net::TcpStream,
     db: &Arc<DB>,
     parts: Vec<&str>,
-) -> Result<Response, MemcachedError> {
+) -> Result<Response, HorcruxError> {
     // validate request
     if parts.len() != 5 {
         return Ok(Response::Error);
@@ -36,15 +36,11 @@ pub async fn handle_set(
     let mut buf = vec![0; len];
     match socket.read(&mut buf).await {
         Ok(n) if n != len => {
-            return Err(MemcachedError::Connection(
-                "Failed to read data".to_string(),
-            ));
+            return Err(HorcruxError::Connection("Failed to read data".to_string()));
         }
         Ok(_) => {}
         Err(_) => {
-            return Err(MemcachedError::Connection(
-                "Failed to read data".to_string(),
-            ));
+            return Err(HorcruxError::Connection("Failed to read data".to_string()));
         }
     }
 

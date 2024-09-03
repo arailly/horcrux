@@ -1,7 +1,7 @@
-use crate::memcached::server::ServerConfig;
+use crate::horcrux::server::Config;
 use clap::Parser;
 
-mod memcached;
+mod horcrux;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -15,10 +15,10 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let config = ServerConfig::new(
+    let config = Config::new(
         "0.0.0.0:11211".to_string(),
         args.snapshot_dir.clone(),
         args.snapshot_interval_secs,
     )?;
-    memcached::serve(&config).await
+    horcrux::serve(&config).await
 }
