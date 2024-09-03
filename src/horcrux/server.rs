@@ -4,8 +4,9 @@ use std::error::Error;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::Mutex;
-use tokio::{signal, time, time::Duration};
+use tokio::{time, time::Duration};
 
 use super::db::{Value, DB};
 use super::handler::{handle_get, handle_set};
@@ -48,15 +49,16 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     // SIGTERM handler
     let snapshot_dir_for_signal = config.snapshot_dir.clone();
     let db_for_signal = db.clone();
-    let mut signal_task = tokio::spawn(async move {
-        match signal::ctrl_c().await {
-            Ok(_) => {
+    let mut sigterm = signal(SignalKind::terminate())?;
+    let mut sigterm_task = tokio::spawn(async move {
+        match sigterm.recv().await {
+            Some(_) => {
                 println!("Taking snapshot before shutting down");
                 handle_snapshot(&db_for_signal, &snapshot_dir_for_signal).await;
                 println!("Shutting down...");
             }
-            Err(err) => {
-                println!("Failed to listen for SIGTERM: {}", err);
+            None => {
+                println!("Failed to listen for SIGTERM");
             }
         }
     });
@@ -89,7 +91,7 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
                     process(socket, db, &snapshot_dir).await;
                 });
             }
-            _ = &mut signal_task => {
+            _ = &mut sigterm_task => {
                 break;
             }
         }
