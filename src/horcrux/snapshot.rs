@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use super::db::DB;
 
-pub async fn handle_snapshot(db: &Arc<DB>, snapshot_dir: &str) {
+pub async fn take_snapshot(db: &Arc<DB>, snapshot_dir: &str) {
     match unsafe { fork() } {
         Ok(ForkResult::Parent { child, .. }) => {
             println(&format!(

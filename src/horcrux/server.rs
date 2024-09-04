@@ -11,7 +11,7 @@ use tokio::{time, time::Duration};
 
 use super::db::{Value, DB};
 use super::handler::{handle_get, handle_set};
-use super::snapshot_handler::handle_snapshot;
+use super::snapshot::take_snapshot;
 use super::types::{HorcruxError, Response};
 
 pub struct Config {
@@ -68,7 +68,7 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
         match sigterm.recv().await {
             Some(_) => {
                 println!("Taking snapshot before shutting down");
-                handle_snapshot(&db_for_signal, &snapshot_dir_for_signal).await;
+                take_snapshot(&db_for_signal, &snapshot_dir_for_signal).await;
                 println!("Shutting down...");
             }
             None => {
@@ -89,7 +89,7 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
         loop {
             interval.tick().await;
             println!("Start taking snapshot");
-            handle_snapshot(&db_for_interval, &snapshot_dir_for_interval).await;
+            take_snapshot(&db_for_interval, &snapshot_dir_for_interval).await;
             println!("Finished taking snapshot");
         }
     });
@@ -201,7 +201,7 @@ pub async fn process(mut socket: tokio::net::TcpStream, db: Arc<DB>, snapshot_di
                 }
             }
             "snapshot" => {
-                handle_snapshot(&db, snapshot_dir).await;
+                take_snapshot(&db, snapshot_dir).await;
                 if send_response(&mut socket, Response::SnapshotFinished)
                     .await
                     .is_err()
