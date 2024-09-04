@@ -119,7 +119,7 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
 }
 
 async fn restore_db(snapshot_dir: &str) -> Result<Arc<DB>, Box<dyn Error>> {
-    let db = Arc::new(Mutex::new(HashMap::new()));
+    let db = Arc::new(Mutex::new(HashMap::with_capacity(1000)));
     let snapshot_file = format!("{}/snapshot", snapshot_dir);
 
     match tokio::fs::read(snapshot_file).await {
