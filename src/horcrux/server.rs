@@ -42,10 +42,10 @@ impl Config {
 }
 
 pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
+    let db = restore_db(&config.snapshot_dir).await?;
+
     let listener = TcpListener::bind(&config.addr).await?;
     println!("Server running on {}", &config.addr);
-
-    let db = restore_db(&config.snapshot_dir).await?;
 
     // SIGINT handler
     let mut sigint_task = tokio::spawn(async {
