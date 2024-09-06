@@ -55,7 +55,7 @@ pub async fn handle_set(
     let key = parts[1].to_string();
     let value = Value { flags, data: data };
     {
-        db.lock().await.insert(key, value);
+        db.write().await.insert(key, value);
     }
 
     // send response
@@ -72,7 +72,7 @@ pub async fn handle_get(db: &Arc<DB>, parts: Vec<&str>) -> Response {
     let key = parts[1];
     let response: String;
     {
-        let db = db.lock().await;
+        let db = db.read().await;
         if let Some(value) = db.get(key) {
             response = format!(
                 "VALUE {} {} {}\r\n{}\r\nEND\r\n",

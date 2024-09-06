@@ -61,7 +61,7 @@ pub async fn take_snapshot(db: &Arc<DB>, snapshot_dir: &str) {
 
 // format: <key_len: u8><key><flags: u32><data_len: u32><data>...
 async fn dump(db: &Arc<DB>) -> Bytes {
-    let db = db.lock().await;
+    let db = db.read().await;
     let mut dumped = BytesMut::with_capacity(db.len() * 100);
     for (key, value) in db.iter() {
         dumped.put_u8(key.len() as u8);

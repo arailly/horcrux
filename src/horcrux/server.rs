@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tokio::{time, time::Duration};
 
 use super::db::{Value, DB};
@@ -119,7 +119,7 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
 }
 
 async fn restore_db(snapshot_dir: &str) -> Result<Arc<DB>, Box<dyn Error>> {
-    let db = Arc::new(Mutex::new(HashMap::with_capacity(1000)));
+    let db = Arc::new(RwLock::new(HashMap::with_capacity(1000)));
     let snapshot_file = format!("{}/snapshot", snapshot_dir);
 
     match tokio::fs::read(snapshot_file).await {
@@ -129,7 +129,7 @@ async fn restore_db(snapshot_dir: &str) -> Result<Arc<DB>, Box<dyn Error>> {
                 Utc::now().format("%+").to_string()
             );
 
-            let mut db = db.lock().await;
+            let mut db = db.write().await;
             let mut mem = Bytes::from(data);
             while !mem.is_empty() {
                 let key_len = mem.get_u8() as usize;

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
-pub type DB = Mutex<HashMap<String, Value>>;
+pub type DB = RwLock<HashMap<String, Value>>;
 
 pub struct Value {
     pub flags: u32,
