@@ -3,7 +3,6 @@ use chrono::Utc;
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::RwLock;
@@ -11,8 +10,9 @@ use tokio::{time, time::Duration};
 
 use super::db::{Value, DB};
 use super::handler::{handle_get, handle_set};
+use super::memcache::{read_request, send_response, Request, Response};
 use super::snapshot::take_snapshot;
-use super::types::{HorcruxError, Response};
+use super::types::HorcruxError;
 
 pub struct Config {
     addr: String,
@@ -158,32 +158,39 @@ async fn restore_db(snapshot_dir: &str) -> Result<Arc<DB>, Box<dyn Error>> {
 
 pub async fn process(mut socket: tokio::net::TcpStream, db: Arc<DB>, snapshot_dir: &str) {
     loop {
-        // read request line
-        let mut buf = vec![0; 4096];
-        let request: String;
-        match socket.read(&mut buf).await {
-            Ok(n) if n == 0 => {
-                return;
-            }
-            Ok(n) => {
-                request = String::from_utf8_lossy(&buf[..n]).to_string();
-            }
-            Err(_) => {
-                println!("Failed to read from socket");
-                return;
-            }
-        }
+        let req = match read_request(&mut socket).await {
+            Ok(req) => req,
+            Err(err) => match err {
+                HorcruxError::Connection(s) => {
+                    println!("Connection error: {}", s);
+                    return;
+                }
+                HorcruxError::ParseRequest(s) => {
+                    println!("Failed to parse request: {}", s);
+                    if send_response(&mut socket, Response::Error).await.is_err() {
+                        println!("Failed to send response");
+                        return;
+                    }
+                    continue;
+                }
+                HorcruxError::Ignorable => {
+                    continue;
+                }
+                _ => {
+                    return;
+                }
+            },
+        };
 
-        // process request
-        let parts: Vec<&str> = request.trim().split_whitespace().collect();
-        if parts.is_empty() {
-            continue;
-        }
-        let command = parts[0].to_lowercase();
-        match command.as_str() {
-            "set" => match handle_set(&mut socket, &db, parts).await {
-                Ok(response) => {
-                    if send_response(&mut socket, response).await.is_err() {
+        match req {
+            Request::Set {
+                key,
+                flags,
+                _exptime,
+                data,
+            } => match handle_set(&db, key, flags, _exptime, data).await {
+                Ok(_) => {
+                    if send_response(&mut socket, Response::Stored).await.is_err() {
                         println!("Failed to send response");
                         return;
                     }
@@ -193,14 +200,17 @@ pub async fn process(mut socket: tokio::net::TcpStream, db: Arc<DB>, snapshot_di
                     return;
                 }
             },
-            "get" => {
-                let response = handle_get(&db, parts).await;
-                if send_response(&mut socket, response).await.is_err() {
+            Request::Get { key } => {
+                let val = handle_get(&db, &key).await;
+                if send_response(&mut socket, Response::Value(key, val))
+                    .await
+                    .is_err()
+                {
                     println!("Failed to send response");
                     return;
                 }
             }
-            "snapshot" => {
+            Request::Snapshot => {
                 take_snapshot(&db, snapshot_dir).await;
                 if send_response(&mut socket, Response::SnapshotFinished)
                     .await
@@ -210,28 +220,6 @@ pub async fn process(mut socket: tokio::net::TcpStream, db: Arc<DB>, snapshot_di
                     return;
                 }
             }
-            "quit" => {
-                return;
-            }
-            _ => {
-                if send_response(&mut socket, Response::Error).await.is_err() {
-                    println!("Failed to send response");
-                    return;
-                }
-            }
         }
     }
-}
-
-async fn send_response(
-    socket: &mut tokio::net::TcpStream,
-    response: Response,
-) -> Result<(), HorcruxError> {
-    if socket.write_all(response.as_bytes()).await.is_err() {
-        println!("Failed to send response");
-        return Err(HorcruxError::Connection(
-            "Failed to send response".to_string(),
-        ));
-    }
-    Ok(())
 }
