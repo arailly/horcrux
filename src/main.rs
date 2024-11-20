@@ -10,13 +10,17 @@ struct Args {
 
     #[clap(long, default_value = "180")]
     snapshot_interval_secs: u64,
+
+    #[clap(long, default_value = "11211")]
+    port: u16,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    let address = format!("0.0.0.0:{}", args.port);
     let config = Config::new(
-        "0.0.0.0:11211".to_string(),
+        address,
         args.snapshot_dir.clone(),
         args.snapshot_interval_secs,
     )?;
