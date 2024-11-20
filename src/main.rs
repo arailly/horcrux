@@ -5,10 +5,10 @@ mod horcrux;
 
 #[derive(Debug, Parser)]
 struct Args {
-    #[clap(default_value = "/var/horcrux")]
+    #[clap(long, default_value = "/var/horcrux")]
     snapshot_dir: String,
 
-    #[clap(default_value = "180")]
+    #[clap(long, default_value = "180")]
     snapshot_interval_secs: u64,
 }
 
