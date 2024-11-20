@@ -1,4 +1,4 @@
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::db::Value;
 use super::types::HorcruxError;
@@ -16,11 +16,14 @@ pub enum Request {
     Snapshot,
 }
 
-pub async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<Request, HorcruxError> {
+pub async fn read_request<R>(reader: &mut R) -> Result<Request, HorcruxError>
+where
+    R: AsyncRead + Unpin,
+{
     // read request line
     let mut buf = vec![0; 4096];
     let request: String;
-    match socket.read(&mut buf).await {
+    match reader.read(&mut buf).await {
         Ok(n) if n == 0 => return Err(HorcruxError::ParseRequest("Empty request".to_string())),
         Ok(n) => {
             request = String::from_utf8_lossy(&buf[..n]).to_string();
@@ -33,7 +36,7 @@ pub async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<Request,
         }
     }
 
-    // switch by command
+    // parse request
     let parts: Vec<&str> = request.trim().split_whitespace().collect();
     if parts.is_empty() {
         return Err(HorcruxError::Ignorable);
@@ -76,7 +79,7 @@ pub async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<Request,
                 data = parts[5].to_string();
             } else {
                 let mut buf = vec![0; len];
-                match socket.read(&mut buf).await {
+                match reader.read(&mut buf).await {
                     Ok(n) if n != len => {
                         return Err(HorcruxError::Connection("Failed to read data".to_string()));
                     }
@@ -147,11 +150,11 @@ impl Response {
     }
 }
 
-pub async fn send_response(
-    socket: &mut tokio::net::TcpStream,
-    response: Response,
-) -> Result<(), HorcruxError> {
-    if socket.write_all(&response.as_bytes()).await.is_err() {
+pub async fn send_response<W>(writer: &mut W, response: Response) -> Result<(), HorcruxError>
+where
+    W: AsyncWrite + Unpin,
+{
+    if writer.write_all(&response.as_bytes()).await.is_err() {
         println!("Failed to send response");
         return Err(HorcruxError::Connection(
             "Failed to send response".to_string(),
