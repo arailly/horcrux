@@ -8,8 +8,10 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::RwLock;
 use tokio::{time, time::Duration};
 
+use crate::horcrux::handler::BaseHandler;
+
 use super::db::{Value, DB};
-use super::handler::{handle_get, handle_set};
+use super::handler::Handler;
 use super::memcache::{read_request, send_response, Request, Response};
 use super::snapshot::take_snapshot;
 use super::types::HorcruxError;
@@ -43,6 +45,7 @@ impl Config {
 
 pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     let db = restore_db(&config.snapshot_dir).await?;
+    let handler = BaseHandler::new(db.clone(), config.snapshot_dir.clone());
 
     let listener = TcpListener::bind(&config.addr).await?;
     println!("Server running on {}", &config.addr);
@@ -98,11 +101,10 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     loop {
         tokio::select! {
             Ok((socket, _)) = listener.accept() => {
-                let db = db.clone();
-                let snapshot_dir = config.snapshot_dir.clone();
+                let h = handler.clone();
 
                 tokio::spawn(async move {
-                    process(socket, db, &snapshot_dir).await;
+                    process(socket, h).await;
                 });
             }
             _ = &mut sigterm_task => {
@@ -156,7 +158,7 @@ async fn restore_db(snapshot_dir: &str) -> Result<Arc<DB>, Box<dyn Error>> {
     Ok(db)
 }
 
-pub async fn process(mut socket: tokio::net::TcpStream, db: Arc<DB>, snapshot_dir: &str) {
+pub async fn process<T: Handler>(mut socket: tokio::net::TcpStream, handler: T) {
     loop {
         let req = match read_request(&mut socket).await {
             Ok(req) => req,
@@ -188,7 +190,7 @@ pub async fn process(mut socket: tokio::net::TcpStream, db: Arc<DB>, snapshot_di
                 flags,
                 _exptime,
                 data,
-            } => match handle_set(&db, key, flags, _exptime, data).await {
+            } => match handler.set(key, flags, _exptime, data).await {
                 Ok(_) => {
                     if send_response(&mut socket, Response::Stored).await.is_err() {
                         println!("Failed to send response");
@@ -201,7 +203,7 @@ pub async fn process(mut socket: tokio::net::TcpStream, db: Arc<DB>, snapshot_di
                 }
             },
             Request::Get { key } => {
-                let val = handle_get(&db, &key).await;
+                let val = handler.get(&key).await;
                 if send_response(&mut socket, Response::Value(key, val))
                     .await
                     .is_err()
@@ -211,7 +213,7 @@ pub async fn process(mut socket: tokio::net::TcpStream, db: Arc<DB>, snapshot_di
                 }
             }
             Request::Snapshot => {
-                take_snapshot(&db, snapshot_dir).await;
+                handler.snapshot().await;
                 if send_response(&mut socket, Response::SnapshotFinished)
                     .await
                     .is_err()
