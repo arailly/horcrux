@@ -4,6 +4,7 @@ pub enum HorcruxError {
     RestoreDB(String),
     Connection(String),
     Ignorable,
+    Internal,
 }
 
 impl std::fmt::Display for HorcruxError {
@@ -13,6 +14,7 @@ impl std::fmt::Display for HorcruxError {
             HorcruxError::RestoreDB(msg) => write!(f, "Failed to restore DB: {}", msg),
             HorcruxError::Connection(msg) => write!(f, "Connection error: {}", msg),
             HorcruxError::Ignorable => write!(f, "Ignorable error"),
+            HorcruxError::Internal => write!(f, "Internal error"),
         }
     }
 }

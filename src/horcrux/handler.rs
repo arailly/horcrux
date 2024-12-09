@@ -1,13 +1,11 @@
-use std::sync::Arc;
-
-use super::db::{Value, DB};
-use super::snapshot::take_snapshot;
+use super::db::Value;
 use super::types::HorcruxError;
+use super::worker::{JobQueue, Request, Response};
 
 pub trait Handler: SetHandler + GetHandler + SnapshotHandler {}
 
 pub trait SetHandler {
-    async fn set(
+    fn set(
         &self,
         key: String,
         flags: u32,
@@ -17,33 +15,31 @@ pub trait SetHandler {
 }
 
 pub trait GetHandler {
-    async fn get(&self, key: &str) -> Option<Value>;
+    fn get(&self, key: &str) -> Option<Value>;
 }
 
 pub trait SnapshotHandler {
-    async fn snapshot(&self);
+    fn snapshot(&self) -> Result<(), HorcruxError>;
 }
 
 pub struct BaseHandler {
-    db: Arc<DB>,
-    snapshot_dir: String,
+    job_queue: JobQueue,
 }
 
 impl BaseHandler {
-    pub fn new(db: Arc<DB>, snapshot_dir: String) -> Self {
-        BaseHandler { db, snapshot_dir }
+    pub fn new(job_queue: JobQueue) -> Self {
+        BaseHandler { job_queue }
     }
 
     pub fn clone(&self) -> Self {
         BaseHandler {
-            db: self.db.clone(),
-            snapshot_dir: self.snapshot_dir.clone(),
+            job_queue: self.job_queue.clone(),
         }
     }
 }
 
 impl SetHandler for BaseHandler {
-    async fn set(
+    fn set(
         &self,
         key: String,
         flags: u32,
@@ -54,25 +50,38 @@ impl SetHandler for BaseHandler {
             flags: flags,
             data: data,
         };
-        {
-            self.db.write().await.insert(key, value);
+        let result = self
+            .job_queue
+            .send_request(Request::Set { key, value })
+            .recv();
+        match result {
+            Ok(Response::Stored) => {}
+            _ => return Err(HorcruxError::Internal),
         }
         Ok(())
     }
 }
 
 impl GetHandler for BaseHandler {
-    async fn get(&self, key: &str) -> Option<Value> {
-        {
-            let db = self.db.read().await;
-            return db.get(key).cloned();
+    fn get(&self, key: &str) -> Option<Value> {
+        let result = self.job_queue.send_request(Request::Get {
+            key: key.to_string(),
+        })
+        .recv();
+        
+        match result {
+            Ok(Response::Value(val)) => val,
+            _ => None,
         }
     }
 }
 
 impl SnapshotHandler for BaseHandler {
-    async fn snapshot(&self) {
-        take_snapshot(&self.db, &self.snapshot_dir).await;
+    fn snapshot(&self) -> Result<(), HorcruxError> {
+        match self.job_queue.send_request(Request::Snapshot { wait: false }).recv() {
+            Ok(Response::SnapshotAccepted) => Ok(()),
+            _ => Err(HorcruxError::Internal),
+        }
     }
 }
 

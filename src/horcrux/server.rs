@@ -2,18 +2,18 @@ use bytes::{Buf, Bytes};
 use chrono::Utc;
 use std::collections::HashMap;
 use std::error::Error;
-use std::sync::Arc;
+use std::thread;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::sync::RwLock;
 use tokio::{time, time::Duration};
 
 use crate::horcrux::handler::BaseHandler;
+use crate::horcrux::worker;
+use crate::horcrux::worker::{JobQueue, Worker};
 
 use super::db::{Value, DB};
 use super::handler::Handler;
 use super::memcache::{read_request, send_response, Request, Response};
-use super::snapshot::take_snapshot;
 use super::types::HorcruxError;
 
 pub struct Config {
@@ -45,7 +45,11 @@ impl Config {
 
 pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     let db = restore_db(&config.snapshot_dir).await?;
-    let handler = BaseHandler::new(db.clone(), config.snapshot_dir.clone());
+    let job_queue = JobQueue::new();
+    let mut worker = Worker::new(job_queue.clone(), db, config.snapshot_dir.clone());
+    thread::spawn(move || worker.run());
+
+    let handler = BaseHandler::new(job_queue.clone());
 
     let listener = TcpListener::bind(&config.addr).await?;
     println!("Server running on {}", &config.addr);
@@ -64,14 +68,23 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     });
 
     // SIGTERM handler
-    let snapshot_dir_for_signal = config.snapshot_dir.clone();
-    let db_for_signal = db.clone();
+    let job_queue_for_sigterm = job_queue.clone();
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigterm_task = tokio::spawn(async move {
         match sigterm.recv().await {
             Some(_) => {
                 println!("Taking snapshot before shutting down");
-                take_snapshot(&db_for_signal, &snapshot_dir_for_signal).await;
+                let result = job_queue_for_sigterm
+                    .send_request(worker::Request::Snapshot { wait: true })
+                    .recv();
+                match result {
+                    Ok(worker::Response::SnapshotFinished) => {
+                        println!("Snapshot taken successfully");
+                    }
+                    _ => {
+                        println!("Failed to take snapshot");
+                    }
+                }
                 println!("Shutting down...");
             }
             None => {
@@ -81,9 +94,8 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     });
 
     // take snapshot at regular intervals
+    let job_queue_for_interval = job_queue.clone();
     let interval = config.snapshot_interval_secs;
-    let snapshot_dir_for_interval = config.snapshot_dir.clone();
-    let db_for_interval = db.clone();
     let interval_task = tokio::spawn(async move {
         let mut interval = time::interval(Duration::from_secs(interval));
         // ignore the first tick, which is triggered immediately
@@ -92,7 +104,17 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
         loop {
             interval.tick().await;
             println!("Start taking snapshot");
-            take_snapshot(&db_for_interval, &snapshot_dir_for_interval).await;
+            let result = job_queue_for_interval
+                .send_request(worker::Request::Snapshot { wait: true })
+                .recv();
+            match result {
+                Ok(worker::Response::SnapshotFinished) => {
+                    println!("Snapshot taken successfully");
+                }
+                _ => {
+                    println!("Failed to take snapshot");
+                }
+            }
             println!("Finished taking snapshot");
         }
     });
@@ -120,8 +142,8 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn restore_db(snapshot_dir: &str) -> Result<Arc<DB>, Box<dyn Error>> {
-    let db = Arc::new(RwLock::new(HashMap::with_capacity(1000)));
+async fn restore_db(snapshot_dir: &str) -> Result<DB, Box<dyn Error>> {
+    let mut db = HashMap::with_capacity(1000);
     let snapshot_file = format!("{}/snapshot", snapshot_dir);
 
     match tokio::fs::read(snapshot_file).await {
@@ -131,7 +153,6 @@ async fn restore_db(snapshot_dir: &str) -> Result<Arc<DB>, Box<dyn Error>> {
                 Utc::now().format("%+").to_string()
             );
 
-            let mut db = db.write().await;
             let mut mem = Bytes::from(data);
             while !mem.is_empty() {
                 let key_len = mem.get_u8() as usize;
@@ -190,7 +211,7 @@ pub async fn process<T: Handler>(mut socket: tokio::net::TcpStream, handler: T) 
                 flags,
                 _exptime,
                 data,
-            } => match handler.set(key, flags, _exptime, data).await {
+            } => match handler.set(key, flags, _exptime, data) {
                 Ok(_) => {
                     if send_response(&mut socket, Response::Stored).await.is_err() {
                         println!("Failed to send response");
@@ -203,7 +224,7 @@ pub async fn process<T: Handler>(mut socket: tokio::net::TcpStream, handler: T) 
                 }
             },
             Request::Get { key } => {
-                let val = handler.get(&key).await;
+                let val = handler.get(&key);
                 if send_response(&mut socket, Response::Value(key, val))
                     .await
                     .is_err()
@@ -212,16 +233,23 @@ pub async fn process<T: Handler>(mut socket: tokio::net::TcpStream, handler: T) 
                     return;
                 }
             }
-            Request::Snapshot => {
-                handler.snapshot().await;
-                if send_response(&mut socket, Response::SnapshotFinished)
-                    .await
-                    .is_err()
-                {
-                    println!("Failed to send response");
-                    return;
+            Request::Snapshot => match handler.snapshot() {
+                Ok(_) => {
+                    if send_response(&mut socket, Response::SnapshotFinished)
+                        .await
+                        .is_err()
+                    {
+                        println!("Failed to send response");
+                        return;
+                    }
                 }
-            }
+                Err(_) => {
+                    if send_response(&mut socket, Response::Error).await.is_err() {
+                        println!("Failed to send response");
+                        return;
+                    }
+                }
+            },
         }
     }
 }

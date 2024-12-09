@@ -1,7 +1,6 @@
 use std::collections::HashMap;
-use tokio::sync::RwLock;
 
-pub type DB = RwLock<HashMap<String, Value>>;
+pub type DB = HashMap<String, Value>;
 
 #[derive(Debug, Clone)]
 pub struct Value {

@@ -5,11 +5,10 @@ use nix::unistd::{fork, getpid, ForkResult};
 use std::fs::{rename, File};
 use std::io::prelude::*;
 use std::io::BufWriter;
-use std::sync::Arc;
 
 use super::db::DB;
 
-pub async fn take_snapshot(db: &Arc<DB>, snapshot_dir: &str) {
+pub fn take_snapshot(db: &DB, snapshot_dir: &str, wait: bool) {
     match unsafe { fork() } {
         Ok(ForkResult::Parent { child, .. }) => {
             println(&format!(
@@ -17,12 +16,15 @@ pub async fn take_snapshot(db: &Arc<DB>, snapshot_dir: &str) {
                 Utc::now().format("%+").to_string(),
                 child
             ));
+            if !wait {
+                return;
+            }
             if waitpid(child, None).is_err() {
                 println("Failed to wait for snapshot process");
             }
         }
         Ok(ForkResult::Child) => {
-            let dumped = dump(db).await;
+            let dumped = dump(db);
 
             let prefix = format!("{}/snapshot", snapshot_dir);
             let suffix = Utc::now().format("%+").to_string();
@@ -60,8 +62,7 @@ pub async fn take_snapshot(db: &Arc<DB>, snapshot_dir: &str) {
 }
 
 // format: <key_len: u8><key><flags: u32><data_len: u32><data>...
-async fn dump(db: &Arc<DB>) -> Bytes {
-    let db = db.read().await;
+fn dump(db: &DB) -> Bytes {
     let mut dumped = BytesMut::with_capacity(db.len() * 100);
     for (key, value) in db.iter() {
         dumped.put_u8(key.len() as u8);
