@@ -7,7 +7,7 @@ use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::{time, time::Duration};
 
-use crate::horcrux::handler::BaseHandler;
+use crate::horcrux::handler::ShardHandler;
 use crate::horcrux::worker;
 use crate::horcrux::worker::{JobQueue, Worker};
 
@@ -19,6 +19,7 @@ use super::types::HorcruxError;
 pub struct Config {
     addr: String,
     snapshot_dir: String,
+    shards: usize,
     snapshot_interval_secs: u64,
 }
 
@@ -26,6 +27,7 @@ impl Config {
     pub fn new(
         addr: String,
         snapshot_dir: String,
+        shards: usize,
         snapshot_interval_secs: u64,
     ) -> Result<Self, String> {
         if snapshot_dir == "" {
@@ -38,18 +40,33 @@ impl Config {
         Ok(Config {
             addr,
             snapshot_dir,
+            shards,
             snapshot_interval_secs,
         })
     }
 }
 
 pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
-    let db = restore_db(&config.snapshot_dir).await?;
-    let job_queue = JobQueue::new();
-    let mut worker = Worker::new(job_queue.clone(), db, config.snapshot_dir.clone());
-    thread::spawn(move || worker.run());
+    let mut job_queues = Vec::new();
 
-    let handler = BaseHandler::new(job_queue.clone());
+    for i in 0..config.shards {
+        let db = restore_db(
+            config.snapshot_dir.as_str(),
+            i.to_string().as_str()
+        ).await?;
+        let job_queue = JobQueue::new();
+        let mut worker = Worker::new(
+            i,
+            job_queue.clone(),
+            db,
+            config.snapshot_dir.clone(),
+        );
+        thread::spawn(move || worker.run());
+
+        job_queues.push(job_queue);
+    }
+
+    let handler = ShardHandler::new(job_queues.clone());
 
     let listener = TcpListener::bind(&config.addr).await?;
     println!("Server running on {}", &config.addr);
@@ -68,21 +85,29 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     });
 
     // SIGTERM handler
-    let job_queue_for_sigterm = job_queue.clone();
+    let job_queues_for_sigterm = job_queues.clone();
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigterm_task = tokio::spawn(async move {
         match sigterm.recv().await {
             Some(_) => {
                 println!("Taking snapshot before shutting down");
-                let result = job_queue_for_sigterm
-                    .send_request(worker::Request::Snapshot { wait: true })
-                    .recv();
-                match result {
-                    Ok(worker::Response::SnapshotFinished) => {
-                        println!("Snapshot taken successfully");
-                    }
-                    _ => {
-                        println!("Failed to take snapshot");
+
+                // take snapshot for each shard parallelly
+                let receivers = job_queues_for_sigterm
+                    .iter()
+                    .map(|job_queue| job_queue.send_request(worker::Request::Snapshot { wait: true }))
+                    .collect::<Vec<_>>();
+
+                // wait for all snapshots to finish
+                for receiver in receivers {
+                    let result = receiver.recv();
+                    match result {
+                        Ok(worker::Response::SnapshotFinished) => {
+                            println!("Snapshot taken successfully");
+                        }
+                        _ => {
+                            println!("Failed to take snapshot");
+                        }
                     }
                 }
                 println!("Shutting down...");
@@ -94,7 +119,7 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     });
 
     // take snapshot at regular intervals
-    let job_queue_for_interval = job_queue.clone();
+    let job_queues_for_interval = job_queues.clone();
     let interval = config.snapshot_interval_secs;
     let interval_task = tokio::spawn(async move {
         let mut interval = time::interval(Duration::from_secs(interval));
@@ -104,18 +129,26 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
         loop {
             interval.tick().await;
             println!("Start taking snapshot");
-            let result = job_queue_for_interval
-                .send_request(worker::Request::Snapshot { wait: false })
-                .recv();
-            match result {
-                Ok(worker::Response::SnapshotFinished) => {
-                    println!("Snapshot taken successfully");
-                }
-                _ => {
-                    println!("Failed to take snapshot");
+
+            // take snapshot for each shard parallelly
+            let receivers = job_queues_for_interval
+                .iter()
+                .map(|job_queue| job_queue.send_request(worker::Request::Snapshot { wait: true }))
+                .collect::<Vec<_>>();
+
+            // wait for all snapshot requests to accept
+            for receiver in receivers {
+                let result = receiver.recv();
+                match result {
+                    Ok(worker::Response::SnapshotAccepted) => {
+                        println!("Snapshot request has been sent successfully");
+                    }
+                    _ => {
+                        println!("Failed to take snapshot");
+                    }
                 }
             }
-            println!("Finished taking snapshot");
+            println!("Finished to send snapshot request");
         }
     });
 
@@ -142,9 +175,9 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn restore_db(snapshot_dir: &str) -> Result<DB, Box<dyn Error>> {
+async fn restore_db(snapshot_dir: &str, suffix: &str) -> Result<DB, Box<dyn Error>> {
     let mut db = HashMap::with_capacity(1000);
-    let snapshot_file = format!("{}/snapshot", snapshot_dir);
+    let snapshot_file = format!("{}/snapshot-{}", snapshot_dir, suffix);
 
     match tokio::fs::read(snapshot_file).await {
         Ok(data) => {

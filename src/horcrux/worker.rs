@@ -34,13 +34,6 @@ impl JobQueue {
         }
     }
 
-    pub fn clone(&self) -> Self {
-        JobQueue {
-            request_sender: self.request_sender.clone(),
-            request_receiver: self.request_receiver.clone(),
-        }
-    }
-
     pub fn send_request(&self, req: Request) -> Receiver<Response> {
         let (res_tx, res_rx) = bounded(1);
         self.request_sender.send((req, res_tx)).unwrap();
@@ -48,15 +41,26 @@ impl JobQueue {
     }
 }
 
+impl Clone for JobQueue {
+    fn clone(&self) -> Self {
+        JobQueue {
+            request_sender: self.request_sender.clone(),
+            request_receiver: self.request_receiver.clone(),
+        }
+    }
+}
+
 pub struct Worker {
+    id: usize,
     job_queue: JobQueue,
     db: DB,
     snapshot_dir: String,
 }
 
 impl Worker {
-    pub fn new(job_queue: JobQueue, db: DB, snapshot_dir: String) -> Self {
+    pub fn new(id: usize, job_queue: JobQueue, db: DB, snapshot_dir: String) -> Self {
         Worker {
+            id: id,
             job_queue,
             db: db,
             snapshot_dir: snapshot_dir,
@@ -81,7 +85,7 @@ impl Worker {
                     } else {
                         Response::SnapshotAccepted
                     };
-                    take_snapshot(&self.db, &self.snapshot_dir, wait);
+                    take_snapshot(&self.db, &self.snapshot_dir, &self.id.to_string(), wait);
                     res_tx.send(res).unwrap();
                 }
             }
@@ -98,7 +102,7 @@ mod tests {
     #[tokio::test]
     async fn test_worker_set_and_get() {
         let job_queue = JobQueue::new();
-        let mut worker = Worker::new(job_queue.clone(), HashMap::new(), "/tmp".to_string());
+        let mut worker = Worker::new(0, job_queue.clone(), HashMap::new(), "/tmp".to_string());
 
         // Start the worker in a separate task
         thread::spawn(move || {

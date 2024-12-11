@@ -15,6 +15,8 @@ async fn start_server(snapshot_dir: &str) -> Child {
         .arg("--")
         .arg("--snapshot-dir")
         .arg(snapshot_dir)
+        .arg("--shards")
+        .arg("2")
         .arg("--port")
         .arg("11213")
         .spawn()

@@ -8,7 +8,7 @@ use std::io::BufWriter;
 
 use super::db::DB;
 
-pub fn take_snapshot(db: &DB, snapshot_dir: &str, wait: bool) {
+pub fn take_snapshot(db: &DB, snapshot_dir: &str, suffix: &str, wait: bool) {
     match unsafe { fork() } {
         Ok(ForkResult::Parent { child, .. }) => {
             println(&format!(
@@ -26,7 +26,7 @@ pub fn take_snapshot(db: &DB, snapshot_dir: &str, wait: bool) {
         Ok(ForkResult::Child) => {
             let dumped = dump(db);
 
-            let prefix = format!("{}/snapshot", snapshot_dir);
+            let prefix = format!("{}/snapshot-{}", snapshot_dir, suffix);
             let suffix = Utc::now().format("%+").to_string();
             let tmp_file = format!("{}-{}", prefix, suffix);
 
