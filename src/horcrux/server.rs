@@ -105,7 +105,7 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
             interval.tick().await;
             println!("Start taking snapshot");
             let result = job_queue_for_interval
-                .send_request(worker::Request::Snapshot { wait: true })
+                .send_request(worker::Request::Snapshot { wait: false })
                 .recv();
             match result {
                 Ok(worker::Response::SnapshotFinished) => {
