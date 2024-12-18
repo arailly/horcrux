@@ -16,6 +16,7 @@ use super::handler::Handler;
 use super::memcache::{read_request, send_response, Request, Response};
 use super::types::HorcruxError;
 
+#[derive(Clone)]
 pub struct Config {
     addr: String,
     snapshot_dir: String,
@@ -50,20 +51,23 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     let mut job_queues = Vec::new();
 
     for i in 0..config.shards {
-        let db = restore_db(
-            config.snapshot_dir.as_str(),
-            i.to_string().as_str()
-        ).await?;
         let job_queue = JobQueue::new();
-        let mut worker = Worker::new(
-            i,
-            job_queue.clone(),
-            db,
-            config.snapshot_dir.clone(),
-        );
-        thread::spawn(move || worker.run());
+        job_queues.push(job_queue.clone());
+        let config_for_worker = config.clone();
 
-        job_queues.push(job_queue);
+        thread::spawn(move || {
+            let db = restore_db(
+                config_for_worker.snapshot_dir.as_str(),
+                i.to_string().as_str(),
+            );
+            let mut worker = Worker::new(
+                i,
+                job_queue.clone(),
+                db,
+                config_for_worker.snapshot_dir.clone(),
+            );
+            worker.run();
+        });
     }
 
     let handler = ShardHandler::new(job_queues.clone());
@@ -95,7 +99,9 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
                 // take snapshot for each shard parallelly
                 let receivers = job_queues_for_sigterm
                     .iter()
-                    .map(|job_queue| job_queue.send_request(worker::Request::Snapshot { wait: true }))
+                    .map(|job_queue| {
+                        job_queue.send_request(worker::Request::Snapshot { wait: true })
+                    })
                     .collect::<Vec<_>>();
 
                 // wait for all snapshots to finish
@@ -175,11 +181,11 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn restore_db(snapshot_dir: &str, suffix: &str) -> Result<DB, Box<dyn Error>> {
+fn restore_db(snapshot_dir: &str, suffix: &str) -> DB {
     let mut db = HashMap::with_capacity(1000);
     let snapshot_file = format!("{}/snapshot-{}", snapshot_dir, suffix);
 
-    match tokio::fs::read(snapshot_file).await {
+    match std::fs::read(snapshot_file) {
         Ok(data) => {
             println!(
                 "{:?}: Restoring DB from snapshot",
@@ -188,12 +194,14 @@ async fn restore_db(snapshot_dir: &str, suffix: &str) -> Result<DB, Box<dyn Erro
 
             let mut mem = Bytes::from(data);
             while !mem.is_empty() {
-                let key_len = mem.get_u8() as usize;
-                let key = String::from_utf8(mem.split_to(key_len).to_vec())?;
-                let flags = mem.get_u32();
-                let data_len = mem.get_u32() as usize;
-                let data = String::from_utf8(mem.split_to(data_len).to_vec())?;
-                db.insert(key, Value { flags, data });
+                let (key, value) = match get_key_value_from_bytes(&mut mem) {
+                    Ok((key, value)) => (key, value),
+                    Err(err) => {
+                        println!("{}", err);
+                        return db;
+                    }
+                };
+                db.insert(key, value);
             }
         }
         Err(err) => match err.kind() {
@@ -201,15 +209,25 @@ async fn restore_db(snapshot_dir: &str, suffix: &str) -> Result<DB, Box<dyn Erro
                 println!("Snapshot file not found. Starting with empty DB.");
             }
             _ => {
-                return Err(
-                    HorcruxError::RestoreDB("Failed to read snapshot file".to_string()).into(),
-                );
+                println!("Failed to read snapshot file: {}", err);
+                return db;
             }
         },
     }
 
     println!("{:?}: DB restored", Utc::now().format("%+").to_string());
-    Ok(db)
+    db
+}
+
+fn get_key_value_from_bytes(mem: &mut Bytes) -> Result<(String, Value), HorcruxError> {
+    let key_len = mem.get_u8() as usize;
+    let key = String::from_utf8(mem.split_to(key_len).to_vec())
+        .map_err(|_| HorcruxError::RestoreDB("Failed to parse key from snapshot".to_string()))?;
+    let flags = mem.get_u32();
+    let data_len = mem.get_u32() as usize;
+    let data = String::from_utf8(mem.split_to(data_len).to_vec())
+        .map_err(|_| HorcruxError::RestoreDB("Failed to parse data from snapshot".to_string()))?;
+    Ok((key, Value { flags, data }))
 }
 
 pub async fn process<T: Handler>(mut socket: tokio::net::TcpStream, handler: T) {
