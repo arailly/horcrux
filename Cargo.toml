@@ -1,18 +1,37 @@
-[package]
-name = "horcrux"
-version = "0.1.0"
+[workspace]
+members = ["types", "db", "server"]
+
+[workspace.package]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies]
+[workspace.dependencies]
+types = { path = "./types" }
+db = { path = "./db" }
+server = { path = "./server" }
+
 bytes = "1.7.1"
 chrono = "0.4.38"
-clap = { version = "4.5.16", features = ["derive"] }
+clap = { version = "4.5.16" }
 libc = "0.2.158"
 log = "0.4.22"
 nix = "0.23"
 tokio = { version = "1", features = ["full"] }
-tokio-util = { version = "0.7.12", features = ["codec"] }
+tokio-util = { version = "0.7.12" }
 rand = "0.8"
 crossbeam-channel = "0.5.13"
+
+[package]
+name = "horcrux"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+types.workspace = true
+db.workspace = true
+server.workspace = true
+clap = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["full"] }
+nix = { workspace = true }
+rand = { workspace = true }

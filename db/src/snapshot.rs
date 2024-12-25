@@ -34,7 +34,7 @@ pub fn take_snapshot(db: &DB, snapshot_dir: &str, suffix: &str, wait: bool) {
                 Ok(f) => f,
                 Err(_) => {
                     println("Failed to create snapshot file");
-                    unsafe { libc::_exit(1) };
+                    unsafe { libc::_exit(1) }
                 }
             };
             f.write_all(&dumped).unwrap();

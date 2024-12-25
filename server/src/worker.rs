@@ -1,9 +1,7 @@
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
 
-use super::{
-    db::{Value, DB},
-    snapshot::take_snapshot,
-};
+use db::db::{Value, DB};
+use db::snapshot::take_snapshot;
 
 #[derive(Debug)]
 pub enum Request {

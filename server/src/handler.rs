@@ -1,8 +1,8 @@
-use super::db::Value;
-use super::types::HorcruxError;
 use super::worker::{JobQueue, Request, Response};
+use db::db::Value;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use types::types::HorcruxError;
 
 // -----------------------------------------------------------------------------
 // Handler trait
@@ -11,13 +11,7 @@ use std::hash::{Hash, Hasher};
 pub trait Handler: Clone + SetHandler + GetHandler + SnapshotHandler {}
 
 pub trait SetHandler {
-    fn set(
-        &self,
-        key: String,
-        flags: u32,
-        exptime: u32,
-        data: String,
-    ) -> Result<(), HorcruxError>;
+    fn set(&self, key: String, flags: u32, exptime: u32, data: String) -> Result<(), HorcruxError>;
 }
 
 pub trait GetHandler {
@@ -57,10 +51,7 @@ impl SetHandler for BaseHandler {
         _exptime: u32,
         data: String,
     ) -> Result<(), HorcruxError> {
-        let value = Value {
-            flags,
-            data,
-        };
+        let value = Value { flags, data };
         let result = self
             .job_queue
             .send_request(Request::Set { key, value })
@@ -75,11 +66,13 @@ impl SetHandler for BaseHandler {
 
 impl GetHandler for BaseHandler {
     fn get(&self, key: &str) -> Option<Value> {
-        let result = self.job_queue.send_request(Request::Get {
-            key: key.to_string(),
-        })
-        .recv();
-        
+        let result = self
+            .job_queue
+            .send_request(Request::Get {
+                key: key.to_string(),
+            })
+            .recv();
+
         match result {
             Ok(Response::Value(val)) => val,
             _ => None,
@@ -89,7 +82,11 @@ impl GetHandler for BaseHandler {
 
 impl SnapshotHandler for BaseHandler {
     fn snapshot(&self) -> Result<(), HorcruxError> {
-        match self.job_queue.send_request(Request::Snapshot { wait: false }).recv() {
+        match self
+            .job_queue
+            .send_request(Request::Snapshot { wait: false })
+            .recv()
+        {
             Ok(Response::SnapshotAccepted) => Ok(()),
             _ => Err(HorcruxError::Internal),
         }
@@ -132,12 +129,8 @@ impl SetHandler for ShardHandler {
         key.hash(&mut hasher);
         let hash = hasher.finish();
         let shard_id = (hash as usize) % self.job_queues.len();
-        let value = Value {
-            flags,
-            data,
-        };
-        let result = self
-            .job_queues[shard_id]
+        let value = Value { flags, data };
+        let result = self.job_queues[shard_id]
             .send_request(Request::Set { key, value })
             .recv();
         match result {
@@ -154,11 +147,12 @@ impl GetHandler for ShardHandler {
         key.hash(&mut hasher);
         let hash = hasher.finish();
         let shard_id = (hash as usize) % self.job_queues.len();
-        let result = self.job_queues[shard_id].send_request(Request::Get {
-            key: key.to_string(),
-        })
-        .recv();
-        
+        let result = self.job_queues[shard_id]
+            .send_request(Request::Get {
+                key: key.to_string(),
+            })
+            .recv();
+
         match result {
             Ok(Response::Value(val)) => val,
             _ => None,
@@ -170,7 +164,11 @@ impl SnapshotHandler for ShardHandler {
     fn snapshot(&self) -> Result<(), HorcruxError> {
         let mut results = Vec::new();
         for job_queue in &self.job_queues {
-            results.push(job_queue.send_request(Request::Snapshot { wait: false }).recv());
+            results.push(
+                job_queue
+                    .send_request(Request::Snapshot { wait: false })
+                    .recv(),
+            );
         }
         for result in results {
             match result {

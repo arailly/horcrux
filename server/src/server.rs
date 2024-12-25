@@ -7,14 +7,14 @@ use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::{time, time::Duration};
 
-use crate::horcrux::handler::ShardHandler;
-use crate::horcrux::worker;
-use crate::horcrux::worker::{JobQueue, Worker};
+use super::handler::ShardHandler;
+use super::worker;
+use super::worker::{JobQueue, Worker};
 
-use super::db::{Value, DB};
 use super::handler::Handler;
 use super::memcache::{read_request, send_response, Request, Response};
-use super::types::HorcruxError;
+use db::db::{Value, DB};
+use types::types::HorcruxError;
 
 #[derive(Clone)]
 pub struct Config {

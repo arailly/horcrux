@@ -1,7 +1,5 @@
-use crate::horcrux::server::Config;
 use clap::Parser;
-
-mod horcrux;
+use server::server::Config;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -28,5 +26,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.shards,
         args.snapshot_interval_secs,
     )?;
-    horcrux::serve(&config).await
+    server::server::serve(&config).await
 }
