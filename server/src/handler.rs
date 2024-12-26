@@ -19,7 +19,7 @@ pub trait GetHandler {
 }
 
 pub trait SnapshotHandler {
-    fn snapshot(&self) -> Result<(), HorcruxError>;
+    fn snapshot(&self, wait: bool) -> Result<(), HorcruxError>;
 }
 
 // -----------------------------------------------------------------------------
@@ -81,10 +81,10 @@ impl GetHandler for BaseHandler {
 }
 
 impl SnapshotHandler for BaseHandler {
-    fn snapshot(&self) -> Result<(), HorcruxError> {
+    fn snapshot(&self, wait: bool) -> Result<(), HorcruxError> {
         match self
             .job_queue
-            .send_request(Request::Snapshot { wait: false })
+            .send_request(Request::Snapshot { wait: wait })
             .recv()
         {
             Ok(Response::SnapshotAccepted) => Ok(()),
@@ -161,19 +161,27 @@ impl GetHandler for ShardHandler {
 }
 
 impl SnapshotHandler for ShardHandler {
-    fn snapshot(&self) -> Result<(), HorcruxError> {
-        let mut results = Vec::new();
-        for job_queue in &self.job_queues {
-            results.push(
-                job_queue
-                    .send_request(Request::Snapshot { wait: false })
-                    .recv(),
-            );
-        }
-        for result in results {
+    fn snapshot(&self, wait: bool) -> Result<(), HorcruxError> {
+        // take snapshot for each shard parallelly
+        let receivers = &self
+            .job_queues
+            .iter()
+            .map(|job_queue| job_queue.send_request(Request::Snapshot { wait: wait }))
+            .collect::<Vec<_>>();
+
+        // wait for all snapshots to finish
+        for receiver in receivers {
+            let result = receiver.recv();
             match result {
-                Ok(Response::SnapshotAccepted) => {}
-                _ => return Err(HorcruxError::Internal),
+                Ok(Response::SnapshotFinished) => {
+                    println!("Snapshot taken successfully");
+                }
+                Ok(Response::SnapshotAccepted) => {
+                    println!("Snapshot request accepted");
+                }
+                _ => {
+                    println!("Failed to take snapshot");
+                }
             }
         }
         Ok(())

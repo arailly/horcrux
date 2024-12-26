@@ -1,0 +1,11 @@
+[package]
+name = "db-generator"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+types.workspace = true
+db.workspace = true
+server.workspace = true
+rand.workspace = true
+clap = { workspace = true, features = ["derive"] }

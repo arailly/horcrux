@@ -167,6 +167,7 @@ where
 mod tests {
     use std::io::Cursor;
     use tokio::io::BufReader;
+    use types::types::HorcruxError;
 
     use crate::memcache::{read_request, Request};
 
@@ -197,68 +198,68 @@ mod tests {
         }
     }
 
-    // #[tokio::test]
-    // async fn test_read_request_set_error() {
-    //     let data = "set key 0 0\r\n";
-    //     let mut socket = create_mock_socket(data).await;
+    #[tokio::test]
+    async fn test_read_request_set_error() {
+        let data = "set key 0 0\r\n";
+        let mut socket = create_mock_socket(data).await;
 
-    //     let result = read_request(&mut socket).await;
-    //     assert!(result.is_err());
-    //     match result.err().unwrap() {
-    //         HorcruxError::ParseRequest(_) => {} // expected
-    //         _ => panic!("Expected ParseRequest error"),
-    //     }
-    // }
+        let result = read_request(&mut socket).await;
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            HorcruxError::ParseRequest(_) => {} // expected
+            _ => panic!("Expected ParseRequest error"),
+        }
+    }
 
-    // #[tokio::test]
-    // async fn test_read_request_get() {
-    //     let data = "get key\r\n";
-    //     let mut socket = create_mock_socket(data).await;
+    #[tokio::test]
+    async fn test_read_request_get() {
+        let data = "get key\r\n";
+        let mut socket = create_mock_socket(data).await;
 
-    //     let request = read_request(&mut socket).await.unwrap();
-    //     match request {
-    //         Request::Get { key } => {
-    //             assert_eq!(key, "key");
-    //         }
-    //         _ => panic!("Expected Get request"),
-    //     }
-    // }
+        let request = read_request(&mut socket).await.unwrap();
+        match request {
+            Request::Get { key } => {
+                assert_eq!(key, "key");
+            }
+            _ => panic!("Expected Get request"),
+        }
+    }
 
-    // #[tokio::test]
-    // async fn test_read_request_get_error() {
-    //     let data = "get\r\n";
-    //     let mut socket = create_mock_socket(data).await;
+    #[tokio::test]
+    async fn test_read_request_get_error() {
+        let data = "get\r\n";
+        let mut socket = create_mock_socket(data).await;
 
-    //     let result = read_request(&mut socket).await;
-    //     assert!(result.is_err());
-    //     match result.err().unwrap() {
-    //         HorcruxError::ParseRequest(_) => {} // expected
-    //         _ => panic!("Expected ParseRequest error"),
-    //     }
-    // }
+        let result = read_request(&mut socket).await;
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            HorcruxError::ParseRequest(_) => {} // expected
+            _ => panic!("Expected ParseRequest error"),
+        }
+    }
 
-    // #[tokio::test]
-    // async fn test_read_request_snapshot() {
-    //     let data = "snapshot\r\n";
-    //     let mut socket = create_mock_socket(data).await;
+    #[tokio::test]
+    async fn test_read_request_snapshot() {
+        let data = "snapshot\r\n";
+        let mut socket = create_mock_socket(data).await;
 
-    //     let request = read_request(&mut socket).await.unwrap();
-    //     match request {
-    //         Request::Snapshot => {}
-    //         _ => panic!("Expected Snapshot request"),
-    //     }
-    // }
+        let request = read_request(&mut socket).await.unwrap();
+        match request {
+            Request::Snapshot => {}
+            _ => panic!("Expected Snapshot request"),
+        }
+    }
 
-    // #[tokio::test]
-    // async fn test_read_request_invalid() {
-    //     let data = "invalid request\r\n";
-    //     let mut socket = create_mock_socket(data).await;
+    #[tokio::test]
+    async fn test_read_request_invalid() {
+        let data = "invalid request\r\n";
+        let mut socket = create_mock_socket(data).await;
 
-    //     let result = read_request(&mut socket).await;
-    //     assert!(result.is_err());
-    //     match result.err().unwrap() {
-    //         HorcruxError::ParseRequest(_) => {} // expected
-    //         _ => panic!("Expected ParseRequest error"),
-    //     }
-    // }
+        let result = read_request(&mut socket).await;
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            HorcruxError::ParseRequest(_) => {} // expected
+            _ => panic!("Expected ParseRequest error"),
+        }
+    }
 }

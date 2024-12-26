@@ -7,14 +7,12 @@ use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::{time, time::Duration};
 
-use super::handler::ShardHandler;
-use super::worker;
-use super::worker::{JobQueue, Worker};
-
-use super::handler::Handler;
-use super::memcache::{read_request, send_response, Request, Response};
 use db::db::{Value, DB};
 use types::types::HorcruxError;
+
+use super::handler::{Handler, ShardHandler, SnapshotHandler};
+use super::memcache::{read_request, send_response, Request, Response};
+use super::worker::{JobQueue, Worker};
 
 #[derive(Clone)]
 pub struct Config {
@@ -89,31 +87,18 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     });
 
     // SIGTERM handler
-    let job_queues_for_sigterm = job_queues.clone();
+    let handler_for_sigterm = handler.clone();
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigterm_task = tokio::spawn(async move {
         match sigterm.recv().await {
             Some(_) => {
                 println!("Taking snapshot before shutting down");
-
-                // take snapshot for each shard parallelly
-                let receivers = job_queues_for_sigterm
-                    .iter()
-                    .map(|job_queue| {
-                        job_queue.send_request(worker::Request::Snapshot { wait: true })
-                    })
-                    .collect::<Vec<_>>();
-
-                // wait for all snapshots to finish
-                for receiver in receivers {
-                    let result = receiver.recv();
-                    match result {
-                        Ok(worker::Response::SnapshotFinished) => {
-                            println!("Snapshot taken successfully");
-                        }
-                        _ => {
-                            println!("Failed to take snapshot");
-                        }
+                match handler_for_sigterm.snapshot(true) {
+                    Ok(_) => {
+                        println!("Snapshot taken successfully");
+                    }
+                    Err(_) => {
+                        println!("Failed to take snapshot");
                     }
                 }
                 println!("Shutting down...");
@@ -125,7 +110,7 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     });
 
     // take snapshot at regular intervals
-    let job_queues_for_interval = job_queues.clone();
+    let handler_for_interval = handler.clone();
     let interval = config.snapshot_interval_secs;
     let interval_task = tokio::spawn(async move {
         let mut interval = time::interval(Duration::from_secs(interval));
@@ -135,23 +120,12 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
         loop {
             interval.tick().await;
             println!("Start taking snapshot");
-
-            // take snapshot for each shard parallelly
-            let receivers = job_queues_for_interval
-                .iter()
-                .map(|job_queue| job_queue.send_request(worker::Request::Snapshot { wait: true }))
-                .collect::<Vec<_>>();
-
-            // wait for all snapshot requests to accept
-            for receiver in receivers {
-                let result = receiver.recv();
-                match result {
-                    Ok(worker::Response::SnapshotAccepted) => {
-                        println!("Snapshot request has been sent successfully");
-                    }
-                    _ => {
-                        println!("Failed to take snapshot");
-                    }
+            match handler_for_interval.snapshot(false) {
+                Ok(_) => {
+                    println!("Snapshot taken successfully");
+                }
+                Err(_) => {
+                    println!("Failed to take snapshot");
                 }
             }
             println!("Finished to send snapshot request");
@@ -284,7 +258,7 @@ pub async fn process<T: Handler>(mut socket: tokio::net::TcpStream, handler: T) 
                     return;
                 }
             }
-            Request::Snapshot => match handler.snapshot() {
+            Request::Snapshot => match handler.snapshot(false) {
                 Ok(_) => {
                     if send_response(&mut socket, Response::SnapshotFinished)
                         .await

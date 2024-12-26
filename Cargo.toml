@@ -1,5 +1,5 @@
 [workspace]
-members = ["types", "db", "server"]
+members = ["types", "db", "server", "db-generator"]
 
 [workspace.package]
 edition = "2021"
