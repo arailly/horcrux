@@ -3,18 +3,26 @@ use std::thread;
 use clap::Parser;
 use rand::distributions::{Alphanumeric, DistString};
 
-use db::db::{Value, DB};
-use db::snapshot::take_snapshot;
+use db::db::DB;
 use server::handler::{SetHandler, ShardHandler, SnapshotHandler};
 use server::worker::{JobQueue, Worker};
 
 #[derive(Debug, Parser)]
 struct Args {
-    #[clap(long, default_value = "/var/horcrux")]
+    #[clap(long, default_value = "/tmp/horcrux")]
     snapshot_dir: String,
 
     #[clap(long, default_value = "1")]
     shards: usize,
+
+    #[clap(long, default_value = "1000000")]
+    db_len: usize,
+
+    #[clap(long, default_value = "36")]
+    key_len: usize,
+
+    #[clap(long, default_value = "450")]
+    data_len: usize,
 }
 
 fn main() {
@@ -39,9 +47,9 @@ fn main() {
 
     // initialize db with random keys and values
     let mut rng = rand::thread_rng();
-    for _ in 0..1000 * 1000 * 7 {
-        let key = Alphanumeric.sample_string(&mut rng, 36);
-        let data = Alphanumeric.sample_string(&mut rng, 450);
+    for _ in 0..args.db_len {
+        let key = Alphanumeric.sample_string(&mut rng, args.key_len);
+        let data = Alphanumeric.sample_string(&mut rng, args.data_len);
         match handler.set(key, 0, 0, data) {
             Ok(_) => {}
             Err(_) => {
