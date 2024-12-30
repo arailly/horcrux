@@ -1,7 +1,6 @@
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
 
 use db::db::{Value, DB};
-use db::snapshot::take_snapshot;
 
 #[derive(Debug)]
 pub enum Request {
@@ -49,19 +48,17 @@ impl Clone for JobQueue {
 }
 
 pub struct Worker {
-    id: usize,
     job_queue: JobQueue,
     db: DB,
-    snapshot_dir: String,
+    snapshot_path: String,
 }
 
 impl Worker {
-    pub fn new(id: usize, job_queue: JobQueue, db: DB, snapshot_dir: String) -> Self {
+    pub fn new(job_queue: JobQueue, db: DB, snapshot_path: String) -> Self {
         Worker {
-            id: id,
             job_queue,
             db: db,
-            snapshot_dir: snapshot_dir,
+            snapshot_path,
         }
     }
 
@@ -83,7 +80,12 @@ impl Worker {
                     } else {
                         Response::SnapshotAccepted
                     };
-                    take_snapshot(&self.db, &self.snapshot_dir, &self.id.to_string(), wait);
+                    match self.db.snapshot(&self.snapshot_path) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("Error while taking snapshot: {:?}", e);
+                        }
+                    }
                     res_tx.send(res).unwrap();
                 }
             }
@@ -94,13 +96,12 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use std::thread;
 
     #[tokio::test]
     async fn test_worker_set_and_get() {
         let job_queue = JobQueue::new();
-        let mut worker = Worker::new(0, job_queue.clone(), HashMap::new(), "/tmp".to_string());
+        let mut worker = Worker::new(job_queue.clone(), DB::new(), "/tmp".to_string());
 
         // Start the worker in a separate task
         thread::spawn(move || {

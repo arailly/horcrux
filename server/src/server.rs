@@ -1,13 +1,10 @@
-use bytes::{Buf, Bytes};
-use chrono::Utc;
-use std::collections::HashMap;
 use std::error::Error;
 use std::thread;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::{time, time::Duration};
 
-use db::db::{Value, DB};
+use db::db::DB;
 use types::types::HorcruxError;
 
 use super::handler::{Handler, ShardHandler, SnapshotHandler};
@@ -54,16 +51,18 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
         let config_for_worker = config.clone();
 
         thread::spawn(move || {
-            let db = restore_db(
-                config_for_worker.snapshot_dir.as_str(),
-                i.to_string().as_str(),
-            );
-            let mut worker = Worker::new(
-                i,
-                job_queue.clone(),
-                db,
-                config_for_worker.snapshot_dir.clone(),
-            );
+            let mut db = DB::new();
+            let path = format!("{}/snapshot-{}", config_for_worker.snapshot_dir, i);
+            match db.restore(&path) {
+                Ok(_) => {
+                    println!("DB restored from snapshot");
+                }
+                Err(err) => {
+                    println!("Failed to restore DB: {}", err);
+                }
+            }
+
+            let mut worker = Worker::new(job_queue.clone(), db, path);
             worker.run();
         });
     }
@@ -155,54 +154,54 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn restore_db(snapshot_dir: &str, suffix: &str) -> DB {
-    let mut db = HashMap::with_capacity(1000);
-    let snapshot_file = format!("{}/snapshot-{}", snapshot_dir, suffix);
+// fn restore_db(snapshot_dir: &str, suffix: &str) -> DB {
+//     let mut db = DB::new();
+//     let snapshot_file = format!("{}/snapshot-{}", snapshot_dir, suffix);
 
-    match std::fs::read(snapshot_file) {
-        Ok(data) => {
-            println!(
-                "{:?}: Restoring DB from snapshot",
-                Utc::now().format("%+").to_string()
-            );
+//     match std::fs::read(snapshot_file) {
+//         Ok(data) => {
+//             println!(
+//                 "{:?}: Restoring DB from snapshot",
+//                 Utc::now().format("%+").to_string()
+//             );
 
-            let mut mem = Bytes::from(data);
-            while !mem.is_empty() {
-                let (key, value) = match get_key_value_from_bytes(&mut mem) {
-                    Ok((key, value)) => (key, value),
-                    Err(err) => {
-                        println!("{}", err);
-                        return db;
-                    }
-                };
-                db.insert(key, value);
-            }
-        }
-        Err(err) => match err.kind() {
-            std::io::ErrorKind::NotFound => {
-                println!("Snapshot file not found. Starting with empty DB.");
-            }
-            _ => {
-                println!("Failed to read snapshot file: {}", err);
-                return db;
-            }
-        },
-    }
+//             let mut mem = Bytes::from(data);
+//             while !mem.is_empty() {
+//                 let (key, value) = match get_key_value_from_bytes(&mut mem) {
+//                     Ok((key, value)) => (key, value),
+//                     Err(err) => {
+//                         println!("{}", err);
+//                         return db;
+//                     }
+//                 };
+//                 db.insert(key, value);
+//             }
+//         }
+//         Err(err) => match err.kind() {
+//             std::io::ErrorKind::NotFound => {
+//                 println!("Snapshot file not found. Starting with empty DB.");
+//             }
+//             _ => {
+//                 println!("Failed to read snapshot file: {}", err);
+//                 return db;
+//             }
+//         },
+//     }
 
-    println!("{:?}: DB restored", Utc::now().format("%+").to_string());
-    db
-}
+//     println!("{:?}: DB restored", Utc::now().format("%+").to_string());
+//     db
+// }
 
-fn get_key_value_from_bytes(mem: &mut Bytes) -> Result<(String, Value), HorcruxError> {
-    let key_len = mem.get_u8() as usize;
-    let key = String::from_utf8(mem.split_to(key_len).to_vec())
-        .map_err(|_| HorcruxError::RestoreDB("Failed to parse key from snapshot".to_string()))?;
-    let flags = mem.get_u32();
-    let data_len = mem.get_u32() as usize;
-    let data = String::from_utf8(mem.split_to(data_len).to_vec())
-        .map_err(|_| HorcruxError::RestoreDB("Failed to parse data from snapshot".to_string()))?;
-    Ok((key, Value { flags, data }))
-}
+// fn get_key_value_from_bytes(mem: &mut Bytes) -> Result<(String, Value), HorcruxError> {
+//     let key_len = mem.get_u8() as usize;
+//     let key = String::from_utf8(mem.split_to(key_len).to_vec())
+//         .map_err(|_| HorcruxError::RestoreDB("Failed to parse key from snapshot".to_string()))?;
+//     let flags = mem.get_u32();
+//     let data_len = mem.get_u32() as usize;
+//     let data = String::from_utf8(mem.split_to(data_len).to_vec())
+//         .map_err(|_| HorcruxError::RestoreDB("Failed to parse data from snapshot".to_string()))?;
+//     Ok((key, Value { flags, data }))
+// }
 
 pub async fn process<T: Handler>(mut socket: tokio::net::TcpStream, handler: T) {
     loop {

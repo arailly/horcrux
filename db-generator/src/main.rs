@@ -34,11 +34,11 @@ fn main() {
     for i in 0..args.shards {
         let job_queue = JobQueue::new();
         job_queues.push(job_queue.clone());
-        let snapshot_dir = args.snapshot_dir.clone();
+        let snapshot_path = format!("{}/snapshot-{}", args.snapshot_dir.clone(), i);
 
         thread::spawn(move || {
             let db = DB::new();
-            let mut worker = Worker::new(i, job_queue.clone(), db, snapshot_dir.clone());
+            let mut worker = Worker::new(job_queue.clone(), db, snapshot_path);
             worker.run();
         });
     }
