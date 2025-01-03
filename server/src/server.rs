@@ -4,12 +4,11 @@ use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::{time, time::Duration};
 
-use db::db::DB;
-use types::types::HorcruxError;
-
-use super::handler::{Handler, ShardHandler, SnapshotHandler};
+use super::handler::{BaseHandler, Handler, SnapshotHandler};
 use super::memcache::{read_request, send_response, Request, Response};
 use super::worker::{JobQueue, Worker};
+use db::shards::Shards;
+use types::types::HorcruxError;
 
 #[derive(Clone)]
 pub struct Config {
@@ -43,31 +42,22 @@ impl Config {
 }
 
 pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
-    let mut job_queues = Vec::new();
+    let job_queue = JobQueue::new();
+    let job_queue_for_worker = job_queue.clone();
+    let config_for_worker = config.clone();
 
-    for i in 0..config.shards {
-        let job_queue = JobQueue::new();
-        job_queues.push(job_queue.clone());
-        let config_for_worker = config.clone();
+    thread::spawn(move || {
+        let mut shards = Shards::new(
+            config_for_worker.shards,
+            config_for_worker.snapshot_dir.clone(),
+        );
+        shards.restore();
 
-        thread::spawn(move || {
-            let mut db = DB::new();
-            let path = format!("{}/snapshot-{}", config_for_worker.snapshot_dir, i);
-            match db.restore(&path) {
-                Ok(_) => {
-                    println!("DB restored from snapshot");
-                }
-                Err(err) => {
-                    println!("Failed to restore DB: {}", err);
-                }
-            }
+        let mut worker = Worker::new(job_queue_for_worker.clone(), shards);
+        worker.run();
+    });
 
-            let mut worker = Worker::new(job_queue.clone(), db, path);
-            worker.run();
-        });
-    }
-
-    let handler = ShardHandler::new(job_queues.clone());
+    let handler = BaseHandler::new(job_queue.clone());
 
     let listener = TcpListener::bind(&config.addr).await?;
     println!("Server running on {}", &config.addr);
@@ -153,55 +143,6 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     interval_task.abort();
     Ok(())
 }
-
-// fn restore_db(snapshot_dir: &str, suffix: &str) -> DB {
-//     let mut db = DB::new();
-//     let snapshot_file = format!("{}/snapshot-{}", snapshot_dir, suffix);
-
-//     match std::fs::read(snapshot_file) {
-//         Ok(data) => {
-//             println!(
-//                 "{:?}: Restoring DB from snapshot",
-//                 Utc::now().format("%+").to_string()
-//             );
-
-//             let mut mem = Bytes::from(data);
-//             while !mem.is_empty() {
-//                 let (key, value) = match get_key_value_from_bytes(&mut mem) {
-//                     Ok((key, value)) => (key, value),
-//                     Err(err) => {
-//                         println!("{}", err);
-//                         return db;
-//                     }
-//                 };
-//                 db.insert(key, value);
-//             }
-//         }
-//         Err(err) => match err.kind() {
-//             std::io::ErrorKind::NotFound => {
-//                 println!("Snapshot file not found. Starting with empty DB.");
-//             }
-//             _ => {
-//                 println!("Failed to read snapshot file: {}", err);
-//                 return db;
-//             }
-//         },
-//     }
-
-//     println!("{:?}: DB restored", Utc::now().format("%+").to_string());
-//     db
-// }
-
-// fn get_key_value_from_bytes(mem: &mut Bytes) -> Result<(String, Value), HorcruxError> {
-//     let key_len = mem.get_u8() as usize;
-//     let key = String::from_utf8(mem.split_to(key_len).to_vec())
-//         .map_err(|_| HorcruxError::RestoreDB("Failed to parse key from snapshot".to_string()))?;
-//     let flags = mem.get_u32();
-//     let data_len = mem.get_u32() as usize;
-//     let data = String::from_utf8(mem.split_to(data_len).to_vec())
-//         .map_err(|_| HorcruxError::RestoreDB("Failed to parse data from snapshot".to_string()))?;
-//     Ok((key, Value { flags, data }))
-// }
 
 pub async fn process<T: Handler>(mut socket: tokio::net::TcpStream, handler: T) {
     loop {

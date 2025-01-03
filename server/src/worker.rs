@@ -1,6 +1,7 @@
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
 
-use db::db::{Value, DB};
+use db::db::Value;
+use db::shards::Shards;
 
 #[derive(Debug)]
 pub enum Request {
@@ -49,16 +50,14 @@ impl Clone for JobQueue {
 
 pub struct Worker {
     job_queue: JobQueue,
-    db: DB,
-    snapshot_path: String,
+    shards: Shards,
 }
 
 impl Worker {
-    pub fn new(job_queue: JobQueue, db: DB, snapshot_path: String) -> Self {
+    pub fn new(job_queue: JobQueue, shards: Shards) -> Self {
         Worker {
             job_queue,
-            db: db,
-            snapshot_path,
+            shards,
         }
     }
 
@@ -67,11 +66,11 @@ impl Worker {
             let (req, res_tx) = self.job_queue.request_receiver.recv().unwrap();
             match req {
                 Request::Set { key, value } => {
-                    self.db.insert(key, value);
+                    self.shards.insert(key, value);
                     res_tx.send(Response::Stored).unwrap();
                 }
                 Request::Get { key } => {
-                    let res = self.db.get(&key).cloned();
+                    let res = self.shards.get(&key).cloned();
                     res_tx.send(Response::Value(res)).unwrap();
                 }
                 Request::Snapshot { wait } => {
@@ -80,12 +79,7 @@ impl Worker {
                     } else {
                         Response::SnapshotAccepted
                     };
-                    match self.db.snapshot(&self.snapshot_path) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            eprintln!("Error while taking snapshot: {:?}", e);
-                        }
-                    }
+                    self.shards.snapshot(wait);
                     res_tx.send(res).unwrap();
                 }
             }
@@ -101,7 +95,7 @@ mod tests {
     #[tokio::test]
     async fn test_worker_set_and_get() {
         let job_queue = JobQueue::new();
-        let mut worker = Worker::new(job_queue.clone(), DB::new(), "/tmp".to_string());
+        let mut worker = Worker::new(job_queue.clone(), Shards::new(1, "/tmp".to_string()));
 
         // Start the worker in a separate task
         thread::spawn(move || {

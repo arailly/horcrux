@@ -3,7 +3,7 @@ use std::thread;
 use clap::Parser;
 use rand::distributions::{Alphanumeric, DistString};
 
-use db::db::DB;
+use db::shards::Shards;
 use server::handler::{SetHandler, ShardHandler, SnapshotHandler};
 use server::worker::{JobQueue, Worker};
 
@@ -31,17 +31,14 @@ fn main() {
     // setup job queues and handler
     let mut job_queues = Vec::new();
 
-    for i in 0..args.shards {
-        let job_queue = JobQueue::new();
-        job_queues.push(job_queue.clone());
-        let snapshot_path = format!("{}/snapshot-{}", args.snapshot_dir.clone(), i);
+    let job_queue = JobQueue::new();
+    job_queues.push(job_queue.clone());
+    let db = Shards::new(args.shards, args.snapshot_dir.clone());
 
-        thread::spawn(move || {
-            let db = DB::new();
-            let mut worker = Worker::new(job_queue.clone(), db, snapshot_path);
-            worker.run();
-        });
-    }
+    thread::spawn(move || {
+        let mut worker = Worker::new(job_queue.clone(), db);
+        worker.run();
+    });
 
     let handler = ShardHandler::new(job_queues.clone());
 

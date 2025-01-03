@@ -30,7 +30,7 @@ pub struct BaseHandler {
 }
 
 impl BaseHandler {
-    pub fn _new(job_queue: JobQueue) -> Self {
+    pub fn new(job_queue: JobQueue) -> Self {
         BaseHandler { job_queue }
     }
 }
