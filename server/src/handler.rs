@@ -88,6 +88,8 @@ impl SnapshotHandler for BaseHandler {
             .recv()
         {
             Ok(Response::SnapshotAccepted) => Ok(()),
+            Ok(Response::SnapshotFinished) => Ok(()),
+            Ok(Response::SnapshotFailed) => Err(HorcruxError::Internal),
             _ => Err(HorcruxError::Internal),
         }
     }

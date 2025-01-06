@@ -1,7 +1,11 @@
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
 
-use db::db::Value;
-use db::shards::Shards;
+use db::db::{Value, DB};
+use nix::{
+    libc::_exit,
+    sys::wait::waitpid,
+    unistd::{fork, ForkResult},
+};
 
 #[derive(Debug)]
 pub enum Request {
@@ -16,6 +20,7 @@ pub enum Response {
     Value(Option<Value>),
     SnapshotAccepted,
     SnapshotFinished,
+    SnapshotFailed,
 }
 
 pub struct JobQueue {
@@ -50,15 +55,12 @@ impl Clone for JobQueue {
 
 pub struct Worker {
     job_queue: JobQueue,
-    shards: Shards,
+    db: DB,
 }
 
 impl Worker {
-    pub fn new(job_queue: JobQueue, shards: Shards) -> Self {
-        Worker {
-            job_queue,
-            shards,
-        }
+    pub fn new(job_queue: JobQueue, db: DB) -> Self {
+        Worker { job_queue, db }
     }
 
     pub fn run(&mut self) {
@@ -66,21 +68,42 @@ impl Worker {
             let (req, res_tx) = self.job_queue.request_receiver.recv().unwrap();
             match req {
                 Request::Set { key, value } => {
-                    self.shards.insert(key, value);
+                    self.db.insert(key, value);
                     res_tx.send(Response::Stored).unwrap();
                 }
                 Request::Get { key } => {
-                    let res = self.shards.get(&key).cloned();
+                    let res = self.db.get(&key).cloned();
                     res_tx.send(Response::Value(res)).unwrap();
                 }
                 Request::Snapshot { wait } => {
-                    let res = if wait {
-                        Response::SnapshotFinished
-                    } else {
-                        Response::SnapshotAccepted
-                    };
-                    self.shards.snapshot(wait);
-                    res_tx.send(res).unwrap();
+                    // fork and snapshot
+                    match unsafe { fork() } {
+                        Ok(ForkResult::Parent { child, .. }) => {
+                            if !wait {
+                                res_tx.send(Response::SnapshotAccepted).unwrap();
+                                return;
+                            }
+                            if waitpid(child, None).is_err() {
+                                println!("Failed to wait for snapshot process");
+                                res_tx.send(Response::SnapshotFailed).unwrap();
+                            }
+                            res_tx.send(Response::SnapshotFinished).unwrap();
+                        }
+                        Ok(ForkResult::Child) => {
+                            match self.db.snapshot() {
+                                Ok(_) => {}
+                                Err(err) => {
+                                    println!("Failed to snapshot: {}", err);
+                                    unsafe { _exit(1) }
+                                }
+                            }
+                            unsafe { _exit(0) };
+                        }
+                        Err(_) => {
+                            println!("Failed to fork");
+                            res_tx.send(Response::SnapshotFailed).unwrap();
+                        }
+                    }
                 }
             }
         }
@@ -95,7 +118,7 @@ mod tests {
     #[tokio::test]
     async fn test_worker_set_and_get() {
         let job_queue = JobQueue::new();
-        let mut worker = Worker::new(job_queue.clone(), Shards::new(1, "/tmp".to_string()));
+        let mut worker = Worker::new(job_queue.clone(), DB::new("/tmp".to_string()));
 
         // Start the worker in a separate task
         thread::spawn(move || {

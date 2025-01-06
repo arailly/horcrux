@@ -234,6 +234,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
+ "crossbeam-channel",
  "libc",
  "nix",
  "types",
@@ -546,6 +547,7 @@ dependencies = [
  "chrono",
  "crossbeam-channel",
  "db",
+ "nix",
  "tokio",
  "tokio-util",
  "types",

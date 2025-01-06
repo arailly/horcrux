@@ -9,14 +9,12 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-async fn start_server(snapshot_dir: &str) -> Child {
+async fn start_server(snapshot_path: &str) -> Child {
     Command::new("cargo")
         .arg("run")
         .arg("--")
-        .arg("--snapshot-dir")
-        .arg(snapshot_dir)
-        .arg("--shards")
-        .arg("2")
+        .arg("--snapshot-path")
+        .arg(snapshot_path)
         .arg("--port")
         .arg("11213")
         .spawn()
@@ -51,9 +49,10 @@ fn remove_temp_dir(dir: &str) {
 #[tokio::test]
 async fn test_set_and_get() {
     let snapshot_dir = create_temp_dir();
+    let snapshot_path = snapshot_dir.clone() + "/snapshot";
 
     // Setup: start the server
-    let mut server = start_server(&snapshot_dir).await;
+    let mut server = start_server(&snapshot_path).await;
     tokio::time::sleep(Duration::from_secs(2)).await; // Wait for the server to start
 
     // Setup: connect to the server
@@ -79,7 +78,7 @@ async fn test_set_and_get() {
 
     // Setup: restart the server gracefully
     stop_server(&mut server, Signal::SIGTERM).await;
-    server = start_server(&snapshot_dir).await;
+    server = start_server(&snapshot_path).await;
     tokio::time::sleep(Duration::from_secs(2)).await; // Wait for the server to start
     let mut socket = TcpStream::connect("127.0.0.1:11213").await.unwrap();
 
@@ -111,7 +110,7 @@ async fn test_set_and_get() {
     stop_server(&mut server, Signal::SIGINT).await;
 
     // Setup: start the server
-    server = start_server(&snapshot_dir).await;
+    server = start_server(&snapshot_path).await;
     tokio::time::sleep(Duration::from_secs(2)).await; // Wait for the server to start
     let mut socket = TcpStream::connect("127.0.0.1:11213").await.unwrap();
 

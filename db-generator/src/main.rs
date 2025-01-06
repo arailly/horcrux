@@ -3,17 +3,14 @@ use std::thread;
 use clap::Parser;
 use rand::distributions::{Alphanumeric, DistString};
 
-use db::shards::Shards;
-use server::handler::{SetHandler, ShardHandler, SnapshotHandler};
+use db::db::DB;
+use server::handler::{BaseHandler, SetHandler, SnapshotHandler};
 use server::worker::{JobQueue, Worker};
 
 #[derive(Debug, Parser)]
 struct Args {
-    #[clap(long, default_value = "/tmp/horcrux")]
-    snapshot_dir: String,
-
-    #[clap(long, default_value = "1")]
-    shards: usize,
+    #[clap(long, default_value = "/tmp/snapshot")]
+    snapshot_path: String,
 
     #[clap(long, default_value = "1000000")]
     db_len: usize,
@@ -28,19 +25,17 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    // setup job queues and handler
-    let mut job_queues = Vec::new();
-
+    // setup job queue and handler
     let job_queue = JobQueue::new();
-    job_queues.push(job_queue.clone());
-    let db = Shards::new(args.shards, args.snapshot_dir.clone());
+    let db = DB::new(args.snapshot_path.clone());
 
+    let job_queue_for_worker = job_queue.clone();
     thread::spawn(move || {
-        let mut worker = Worker::new(job_queue.clone(), db);
+        let mut worker = Worker::new(job_queue_for_worker, db);
         worker.run();
     });
 
-    let handler = ShardHandler::new(job_queues.clone());
+    let handler = BaseHandler::new(job_queue.clone());
 
     // initialize db with random keys and values
     let mut rng = rand::thread_rng();

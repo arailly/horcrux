@@ -1,3 +1,4 @@
+use db::db::DB;
 use std::error::Error;
 use std::thread;
 use tokio::net::TcpListener;
@@ -7,25 +8,22 @@ use tokio::{time, time::Duration};
 use super::handler::{BaseHandler, Handler, SnapshotHandler};
 use super::memcache::{read_request, send_response, Request, Response};
 use super::worker::{JobQueue, Worker};
-use db::shards::Shards;
 use types::types::HorcruxError;
 
 #[derive(Clone)]
 pub struct Config {
     addr: String,
-    snapshot_dir: String,
-    shards: usize,
+    snapshot_path: String,
     snapshot_interval_secs: u64,
 }
 
 impl Config {
     pub fn new(
         addr: String,
-        snapshot_dir: String,
-        shards: usize,
+        snapshot_path: String,
         snapshot_interval_secs: u64,
     ) -> Result<Self, String> {
-        if snapshot_dir == "" {
+        if snapshot_path == "" {
             return Err("Snapshot directory cannot be empty".to_string());
         }
         if snapshot_interval_secs == 0 {
@@ -34,8 +32,7 @@ impl Config {
 
         Ok(Config {
             addr,
-            snapshot_dir,
-            shards,
+            snapshot_path,
             snapshot_interval_secs,
         })
     }
@@ -47,13 +44,10 @@ pub async fn serve(config: &Config) -> Result<(), Box<dyn Error>> {
     let config_for_worker = config.clone();
 
     thread::spawn(move || {
-        let mut shards = Shards::new(
-            config_for_worker.shards,
-            config_for_worker.snapshot_dir.clone(),
-        );
-        shards.restore();
+        let mut db = DB::new(config_for_worker.snapshot_path.clone());
+        db.restore();
 
-        let mut worker = Worker::new(job_queue_for_worker.clone(), shards);
+        let mut worker = Worker::new(job_queue_for_worker.clone(), db);
         worker.run();
     });
 

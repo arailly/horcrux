@@ -15,11 +15,15 @@ pub struct Value {
 
 pub struct DB {
     db: HashMap<String, Value>,
+    snapshot_path: String,
 }
 
 impl DB {
-    pub fn new() -> Self {
-        DB { db: HashMap::new() }
+    pub fn new(snapshot_path: String) -> Self {
+        DB {
+            db: HashMap::new(),
+            snapshot_path: snapshot_path,
+        }
     }
 
     pub fn insert(&mut self, key: String, value: Value) {
@@ -30,11 +34,11 @@ impl DB {
         self.db.get(key)
     }
 
-    pub fn snapshot(&self, path: &str) -> Result<(), std::io::Error> {
+    pub fn snapshot(&self) -> Result<(), std::io::Error> {
         let dumped = dump(self);
 
         let tmp_suffix = Utc::now().format("%+").to_string();
-        let tmp_path = format!("{}-{}", path, tmp_suffix);
+        let tmp_path = format!("{}-{}", self.snapshot_path, tmp_suffix);
 
         let mut f = match File::create(tmp_path.as_str()) {
             Ok(f) => f,
@@ -45,29 +49,32 @@ impl DB {
         };
         f.write_all(&dumped).unwrap();
         f.sync_all()?;
-        rename(tmp_path.as_str(), path)?;
+        rename(tmp_path.as_str(), self.snapshot_path.as_str())?;
 
         Ok(())
     }
 
-    pub fn restore(&mut self, path: &str) -> Result<(), std::io::Error> {
-        let data = std::fs::read(path)?;
+    pub fn restore(&mut self) {
+        println!("{:?}: Restoring DB from snapshot", now());
+        let data = match std::fs::read(&self.snapshot_path) {
+            Ok(data) => data,
+            Err(err) => {
+                println!("Failed to read snapshot file: {}", err);
+                return;
+            }
+        };
         let mut mem = Bytes::from(data);
         while !mem.is_empty() {
             let (key, value) = match get_key_value_from_bytes(&mut mem) {
                 Ok((key, value)) => (key, value),
                 Err(err) => {
                     println!("{}", err);
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        err.to_string(),
-                    ));
+                    return;
                 }
             };
             self.insert(key, value);
         }
-
-        Ok(())
+        println!("{:?}: DB restored from snapshot", now());
     }
 }
 
@@ -103,13 +110,18 @@ fn get_key_value_from_bytes(mem: &mut Bytes) -> Result<(String, Value), HorcruxE
     Ok((key, Value { flags, data }))
 }
 
+fn now() -> String {
+    Utc::now().format("%+").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_restore() {
-        let mut db = DB::new();
+        let path = "/tmp/test_restore";
+        let mut db = DB::new(path.to_string());
         db.insert(
             "key1".to_string(),
             Value {
@@ -125,11 +137,10 @@ mod tests {
             },
         );
 
-        let path = "/tmp/test_restore";
-        db.snapshot(path).unwrap();
+        db.snapshot().unwrap();
 
-        let mut new_db = DB::new();
-        new_db.restore(path).unwrap();
+        let mut new_db = DB::new(path.to_string());
+        new_db.restore();
 
         let actual_1 = new_db.get("key1").unwrap();
         assert_eq!(actual_1.flags, 0);
